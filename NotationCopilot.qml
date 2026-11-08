@@ -42,6 +42,7 @@ MuseScore {
     property string serverUrl: "https://nzumari.vivaceke.co.ke"
     property string deviceToken: ""                 // scoped Nzumari device token
     property string pairingDeviceCode: ""
+    property bool pairingStarting: false
     property string bachConversationId: ""
     property string python: "python"
     property string copilot: pluginDir() + "copilot.py"
@@ -113,8 +114,7 @@ MuseScore {
         lastScoreName = curScore ? String(curScore.scoreName) : ""
         loadDeviceToken()
         if (deviceToken === "") {
-            say("bot", "Welcome to Bach Editor. Opening Nzumari sign-in so you can connect this installation.", "", "")
-            Qt.callLater(function() { beginPairing() })
+            say("status", "Not connected to Nzumari. Use the Connect button above to authorise this MuseScore installation.", "", "")
         } else {
             say("bot", "Connected to Nzumari Bach. Ask me to change the open score in plain language. Your edits remain local to MuseScore and one Ctrl+Z undoes each request.", "", "")
         }
@@ -129,14 +129,16 @@ MuseScore {
         if (fio.exists()) deviceToken = String(fio.read()).trim()
     }
     function beginPairing() {
-        if (pairingDeviceCode !== "") return
+        if (pairingDeviceCode !== "" || pairingStarting || deviceToken !== "") return
+        pairingStarting = true
         var x = new XMLHttpRequest()
         x.onreadystatechange = function() {
             if (x.readyState !== XMLHttpRequest.DONE) return
+            pairingStarting = false
             var r = null
             try { r = JSON.parse(x.responseText) } catch (e) {}
             if (x.status !== 200 || !r || !r.deviceCode) {
-                say("error", (r && r.error) || "Could not start Nzumari pairing.", "", "")
+                say("error", (r && r.error) || ("Could not start Nzumari pairing (HTTP " + x.status + ")."), "", "")
                 return
             }
             pairingDeviceCode = r.deviceCode
@@ -216,8 +218,8 @@ MuseScore {
                    text: "BACH AI"; font.bold: true; font.pixelSize: 12; font.letterSpacing: 1; color: cText }
             Row {
                 anchors { right: parent.right; rightMargin: 8; top: parent.top; topMargin: 4 } spacing: 4
-                Button { text: deviceToken === "" ? "Sign in" : "Disconnect"; flat: true; font.pixelSize: 11
-                         enabled: !busy; onClicked: { if (deviceToken === "") beginPairing(); else disconnectDevice() } }
+                Button { visible: deviceToken !== ""; text: "Disconnect"; flat: true; font.pixelSize: 11
+                         enabled: !busy; onClicked: disconnectDevice() }
                 Button { text: "New chat"; flat: true; font.pixelSize: 11; enabled: !busy
                          onClicked: { chat.clear(); resetRequest(); bachConversationId = ""; sentCount = 0
                                       say("bot", "New Bach conversation. Tell me what to change in the open score.", "", "") } }
@@ -225,9 +227,31 @@ MuseScore {
             }
         }
 
+        Rectangle {   // persistent connection panel when this installation is not authorised
+            id: connectionPanel
+            visible: deviceToken === ""
+            anchors { left: parent.left; right: parent.right; top: header.bottom; margins: 10 }
+            height: 112
+            radius: 10
+            color: "#ffffff"
+            border.color: cBorder
+            Column {
+                anchors { fill: parent; margins: 12 }
+                spacing: 6
+                Text { text: pairingDeviceCode !== "" ? "WAITING FOR APPROVAL" : (pairingStarting ? "CONNECTING TO NZUMARI…" : "BACH IS NOT CONNECTED")
+                       font.pixelSize: 11; font.bold: true; color: cText }
+                Text { width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 11; color: cMuted
+                       text: pairingDeviceCode !== "" ? "Approve the pairing request in your browser. Code: " + pairingDeviceCode
+                             : "Connect this MuseScore installation to your Nzumari account to use Bach AI." }
+                Button { text: pairingStarting ? "Connecting…" : (pairingDeviceCode !== "" ? "Request pending…" : "Connect to Nzumari")
+                         highlighted: true; enabled: !pairingStarting && pairingDeviceCode === ""
+                         onClicked: beginPairing() }
+            }
+        }
+
         ListView {
             id: list
-            anchors { left: parent.left; right: parent.right; top: header.bottom
+            anchors { left: parent.left; right: parent.right; top: connectionPanel.visible ? connectionPanel.bottom : header.bottom
                       bottom: showExamples ? examplesBox.top : composer.top; margins: 10 }
             clip: true; spacing: 10; model: chat
             ScrollBar.vertical: ScrollBar {}
