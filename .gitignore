@@ -2,3 +2,13 @@
 .env
 .env.*
 !.env.example
+
+# Local Nzumari device credentials and generated score files
+bach-editor-token.txt
+copilot-key.txt
+copilot-export.musicxml
+in-*.musicxml
+out-*.musicxml
+report-*.json
+done-*
+run-*.sh
