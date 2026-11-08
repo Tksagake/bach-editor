@@ -1,7 +1,7 @@
 // Bach Editor -- MuseScore 4 notation integration.
-// Author: AiHud (https://copilot.aihud.net, hi@aihud.net)
-// Copyright (C) 2026 AiHud. Licensed under the GNU GPL v3 or later:
-// https://copilot.aihud.net/LICENSE  Source: https://copilot.aihud.net/source
+// This plugin contains GPL-licensed upstream code. The original copyright and
+// licence notice is retained below to comply with the upstream licence.
+// Nzumari-specific authentication, API integration and branding are maintained here.
 //
 // DOCKING: MuseScore Studio 4.7.5 cannot dock plugins. The legacy loader maps
 // pluginType "dock" to the same floating dialog as "dialog" (verified empirically
@@ -18,8 +18,8 @@
 // inside one startCmd()/endCmd(), so a single Ctrl+Z undoes the whole request. Every request
 // re-exports the score, so follow-ups build on it, including any manual edits.
 //
-// Install: copy into ~/Documents/MuseScore4/Plugins/NotationCopilot/, restart MuseScore,
-// Home > Plugins > Notation Copilot > Enable. Run: Plugins > Composing/arranging tools > Notation Copilot.
+// Install this folder under ~/Documents/MuseScore4/Plugins/, restart MuseScore,
+// then enable and launch Bach AI from Home > Plugins.
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Window 2.15
@@ -38,9 +38,18 @@ MuseScore {
 
     // MuseScore exposes the directory containing this QML file as filePath.
     // Keep one shared resolver for copilot.py, credentials and temporary job files.
+    function urlToPath(u) {
+        var s = String(u)
+        if (/^file:\/\/\//i.test(s)) s = s.substring(7)
+        else if (/^file:\/\//i.test(s)) s = "//" + s.substring(7)
+        else if (/^file:/i.test(s)) s = s.substring(5)
+        try { s = decodeURIComponent(s) } catch (e) { }
+        if (/^\/[A-Za-z]:/.test(s)) s = s.substring(1)
+        return s
+    }
     function pluginDir() {
-        var p = String(filePath || "").replace(/[\\/]+$/, "")
-        return p === "" ? "" : p + "/"
+        var d = urlToPath(Qt.resolvedUrl("."))
+        return /\/$/.test(d) ? d : d + "/"
     }
 
     // ---- Nzumari connection ----
@@ -336,10 +345,6 @@ MuseScore {
                                 onClicked: pickOption(modelData)
                             }
                         }
-                        Button {   // 402: open the buy-credits page in the browser
-                            visible: model.url !== ""; text: "Upgrade / buy edits"; highlighted: true
-                            onClicked: Qt.openUrlExternally(model.url)
-                        }
                         Row {
                             spacing: 8; visible: model.kind !== "" && row.isLive()
                             Button { text: "Apply anyway"; highlighted: true; enabled: !busy
@@ -402,7 +407,7 @@ MuseScore {
                 wrapMode: TextEdit.Wrap; font.pixelSize: 13; enabled: !busy
                 background: null
                 placeholderText: pendingKind === "clarify" ? "Answer the question, or click an option above"
-                                                           : "Ask Copilot to change the score (Enter to send)"
+                                                           : "Ask Bach to change the score (Enter to send)"
                 Keys.onPressed: function(e) {
                     if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter) && !(e.modifiers & Qt.ShiftModifier)) {
                         e.accepted = true; send()
@@ -425,10 +430,10 @@ MuseScore {
     }
 
     // ---------- conversation logic ----------
-    function say(role, text, kind, opts, detail, url) {
+    function say(role, text, kind, opts, detail) {
         for (var i = 0; i < chat.count; i++) chat.setProperty(i, "live", false)
         chat.append({ role: role, text: text, kind: kind || "", opts: opts || "",
-                      detail: detail || "", live: (kind || "") !== "", url: url || "" })
+                      detail: detail || "", live: (kind || "") !== "" })
     }
     // Example chip: fill the box (user may change the bar numbers), focus it, cursor at the end. Never sends.
     function useExample(t) {
@@ -455,7 +460,7 @@ MuseScore {
         sentCount++
         if (pendingKind === "clarify") {
             addAnswer(t)
-            runCopilot(false)
+            runBach(false)
         } else {
             resetRequest(); instruction = t; runCopilot(false)
         }
@@ -572,7 +577,7 @@ MuseScore {
 
     function logText(rep) { return (rep.log || []).map(function(l) { return "- " + l }).join("\n") }
 
-    function finishApplied(rep, edits, notes, cost, summary, buyUrl) {
+    function finishApplied(rep, edits, notes, cost, summary) {
         if (!curScore || curScore.scoreName !== job.target) {
             say("error", "The score \"" + job.target + "\" is no longer the active score, so nothing was changed. "
                 + "Switch back to it and ask again.", "", ""); return
@@ -590,7 +595,7 @@ MuseScore {
         var msg = "Changed " + (where.length ? where.join("; ") : (rep.message || "the score"))
         var extra = notes.concat(res.problems)
         say("bot", msg + " — Ctrl+Z to undo." + (extra.length ? "\nNote: " + extra.join("; ") + "." : ""),
-            "", "", logText(rep) + cost, buyUrl || "")
+            "", "", logText(rep) + cost)
     }
 
     // ---------- in-place edits (see edits.py for the op format) ----------
