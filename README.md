@@ -14,14 +14,14 @@ Bach Editor is a notation-editor integration for Nzumari Bach AI. The initial in
 
 ## Install (MuseScore 4)
 
-1. Copy the plugin folder into your MuseScore 4 plugins directory.
-2. Update the `copilot` property in `NotationCopilot.qml` if your Python helper is installed elsewhere.
-3. Ensure Python 3 is installed and available as `python` in your PATH.
-4. Enable Bach Editor in MuseScore's Plugin Manager and restart MuseScore.
-5. Open a score and run **Plugins → Composing/arranging tools → Bach Editor**.
-6. Select **Connect**. A browser window opens to Nzumari.
-7. Sign in to Nzumari, review the pairing code and approve the MuseScore installation.
-8. Return to MuseScore. Bach Editor will confirm when pairing is complete.
+1. Download the latest **Bach Editor** ZIP from the repository's `feature/nzumari-bach-auth` branch.
+2. Extract the `bach-editor-feature-nzumari-bach-auth` folder into your MuseScore 4 `Plugins` directory. Keep `NotationCopilot.qml` and `copilot.py` together in the same folder.
+3. Ensure Python 3 is installed and available as `python` in your PATH. The plugin locates `copilot.py` relative to its own folder; no user-specific path edit is needed.
+4. Enable **Bach AI** in MuseScore's Plugin Manager and restart MuseScore.
+5. Open a score and run **Plugins → Composing/arranging tools → Bach AI**.
+6. On first launch, Bach Editor automatically starts Nzumari device pairing and opens your browser.
+7. Sign in to Nzumari and approve the MuseScore installation. The pairing code is supplied automatically in the verification page.
+8. Return to MuseScore. Bach Editor will confirm when pairing is complete. Future launches reuse the saved device credential until it expires or is revoked.
 
 No Dahl, MiniMax, DeepSeek or other AI-provider API key is required on the local machine. Provider credentials remain on the Nzumari server.
 
