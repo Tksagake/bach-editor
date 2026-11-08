@@ -37,22 +37,15 @@ MuseScore {
     requiresScore: true
     width: 400; height: 760
 
-    // ---- Settings ----
-    // mode "hosted": POST the exported MusicXML to the AiHud Notation Copilot service
-    //   (customers need only this plugin + an AiHud Copilot key; no Python, no Claude key).
-    // mode "local": run copilot.py on this machine via a launcher script (developer mode).
+    // ---- Nzumari connection ----
     property string mode: "local"
-    property string serverUrl: "https://copilot.aihud.net"   // e.g. http://127.0.0.1:8787 for local testing
-    property string apiKey: ""                                // your AiHud Copilot key
-    property int requestTimeoutSec: 480   // > server REQUEST_TIMEOUT 420 s and nginx 450 s, so the server's own reply arrives first
-
-    // Local mode only -- adjust to your install.
+    property string serverUrl: "https://nzumari.vivaceke.co.ke"
+    property string apiKey: ""                 // scoped Nzumari device token
+    property string pairingDeviceCode: ""
+    property string bachConversationId: ""
     property string python: "python"
     property string copilot: "C:/Users/user/Documents/MuseScore4/Plugins/VivaceCopilot/copilot.py"
-    // Folder for the launcher's temp files; "" = this plugin's own folder (works on every OS).
     property string workDir: ""
-    // Optional env file with DAHL_API_KEY (MuseScore's environment usually lacks it).
-    property string envFile: "C:/Users/user/Documents/MuseScore4/Plugins/VivaceCopilot/.env"
     property int sidebarWidth: 400
 
     // Conversation state for the request in flight.
@@ -70,7 +63,7 @@ MuseScore {
                                      "Transpose the flute part up a major second in bars 1-8",
                                      "Add chord symbols to the melody in bars 1-8",
                                      "Double the melody in the strings in bars 1-8"]
-    readonly property bool showExamples: sentCount === 0 && !busy && !needActivation && (mode !== "hosted" || apiKey !== "")
+    readonly property bool showExamples: sentCount === 0 && !busy && !needActivation && apiKey !== ""
     // 402 error=activate: show the "enter your 6-digit code / resend the email" box above the input.
     property bool needActivation: false
     property bool actBusy: false
@@ -212,9 +205,11 @@ MuseScore {
             }
             Row {
                 anchors { right: parent.right; rightMargin: 8; top: parent.top; topMargin: 4 } spacing: 4
+                Button { text: apiKey === "" ? "Connect" : "Connected"; flat: true; font.pixelSize: 11
+                         enabled: !busy && apiKey === ""; onClicked: beginPairing() }
                 Button { text: "New chat"; flat: true; font.pixelSize: 11; enabled: !busy
-                         onClicked: { chat.clear(); resetRequest(); sentCount = 0
-                                      say("bot", "New chat. Tell me what to change in the open score.", "", "") } }
+                         onClicked: { chat.clear(); resetRequest(); bachConversationId = ""; sentCount = 0
+                                      say("bot", "New Bach conversation. Tell me what to change in the open score.", "", "") } }
                 Button { text: "Close"; flat: true; font.pixelSize: 11; onClicked: root.quit() }
             }
         }
