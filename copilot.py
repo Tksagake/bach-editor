@@ -20,15 +20,12 @@ import argparse
 import os
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Tuple, Optional
-from openai import OpenAI
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
 TPQ = 480  # MuseScore internal ticks per quarter note (hardcoded in QML applyEdits)
 
-DAHL_BASE_URL = "https://inference.dahl.global/v1"
-MODEL_PRIORITY = [
-    "MiniMaxAI/MiniMax-M2.7",
-    "deepseek-ai/DeepSeek-V4-Flash-0731",
-]
+NZUMARI_BASE_URL = "https://nzumari.vivaceke.co.ke"
 
 # ---------------------------------------------------------------------------
 # Error reporting — QML reads stdout, finds first line starting with '{', parses JSON.
@@ -463,65 +460,71 @@ def _extract_json(text: str) -> Dict[str, Any]:
     raise ValueError("Could not extract JSON from model output")
 
 
-def call_dahl(score_context: str, instruction: str, history: List[Tuple[str, str]]) -> Dict[str, Any]:
-    api_key = os.environ.get("DAHL_API_KEY")
-    if not api_key:
-        print_error_and_exit("DAHL_API_KEY environment variable is not set. Set it in your .env file or shell.")
+def call_dahl(
+    score_context: str,
+    instruction: str,
+    history: List[Tuple[str, str]],
+    conversation_id: str = "",
+) -> Dict[str, Any]:
+    """Send notation-edit requests to the authenticated Nzumari Bach API."""
+    token_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bach-editor-token.txt")
+    try:
+        with open(token_path, "r", encoding="utf-8") as token_file:
+            device_token = token_file.read().strip()
+    except OSError:
+        device_token = ""
 
-    client = OpenAI(api_key=api_key, base_url=DAHL_BASE_URL)
+    if not device_token:
+        print_error_and_exit("Bach Editor is not connected. Use Connect in the plugin to pair it with Nzumari.")
 
-    messages: List[Dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    payload = {
+        "instruction": instruction,
+        "history": [{"question": question, "answer": answer} for question, answer in history],
+        "scoreContext": {"editor": "musescore", "scoreSummary": score_context},
+    }
+    if conversation_id:
+        payload["conversationId"] = conversation_id
 
-    for q, a in history:
-        if q:
-            messages.append({"role": "assistant", "content": q})
-        if a:
-            messages.append({"role": "user", "content": a})
-
-    messages.append({
-        "role": "user",
-        "content": f"Score State:\n{score_context}\n\nInstruction: {instruction}",
-    })
-
-    last_error = None
-    content = ""
-
-    for model in MODEL_PRIORITY:
-        try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                response_format={"type": "json_object"},
-                temperature=0.2,
-            )
-            content = response.choices[0].message.content or ""
-            break
-        except Exception as e:
-            last_error = e
-            try:
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=0.2,
-                )
-                content = response.choices[0].message.content or ""
-                break
-            except Exception as e2:
-                last_error = e2
-                continue
-    else:
-        print_error_and_exit(f"All Dahl models failed. Last error: {last_error}")
+    request = Request(
+        NZUMARI_BASE_URL.rstrip("/") + "/api/bach/editor/edit",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": "Bearer " + device_token,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
 
     try:
-        report = _extract_json(content)
-    except (json.JSONDecodeError, ValueError):
-        print_error_and_exit("LLM did not return valid JSON.")
+        with urlopen(request, timeout=300) as response:
+            response_body = response.read().decode("utf-8")
+    except HTTPError as error:
+        try:
+            detail = json.loads(error.read().decode("utf-8"))
+            message = detail.get("error") or "Bach Editor request failed."
+        except Exception:
+            message = "Bach Editor request failed (HTTP %s)." % error.code
+        print_error_and_exit(message)
+    except (URLError, TimeoutError, OSError) as error:
+        print_error_and_exit("Could not reach Nzumari Bach: %s" % error)
 
-    if not isinstance(report, dict) or "status" not in report:
-        print_error_and_exit("Malformed LLM response: missing 'status' field.")
+    try:
+        result = json.loads(response_body)
+    except json.JSONDecodeError:
+        print_error_and_exit("Nzumari Bach returned an invalid response.")
 
-    return report
+    if not isinstance(result, dict):
+        print_error_and_exit("Malformed Bach response.")
+    if result.get("error"):
+        print_error_and_exit(str(result["error"]))
 
+    conversation_id = result.pop("conversationId", "")
+    if conversation_id:
+        result["conversation_id"] = conversation_id
+    if "status" not in result:
+        print_error_and_exit("Malformed Bach response: missing 'status' field.")
+    return result
 
 # ---------------------------------------------------------------------------
 # Report validation (lightweight; QML also validates structurally when applying)
@@ -578,7 +581,7 @@ def main() -> None:
     score_context = serialize_score(score)
 
     # 3. Query Dahl (MiniMax-M2.7 primary, DeepSeek-V4-Flash-0731 fallback)
-    llm_report = call_dahl(score_context, args.instruction, history)
+    llm_report = call_dahl(score_context, args.instruction, history, args.conversation_id)
 
     # 4. Validate + print the clean JSON to stdout for QML
     validate_report(llm_report)
