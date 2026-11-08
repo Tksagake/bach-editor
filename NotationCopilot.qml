@@ -43,7 +43,7 @@ MuseScore {
     property string pairingDeviceCode: ""
     property string bachConversationId: ""
     property string python: "python"
-    property string copilot: "C:/Users/user/Documents/MuseScore4/Plugins/VivaceCopilot/copilot.py"
+    property string copilot: pluginDir() + "copilot.py"
     property string workDir: ""
     property int sidebarWidth: 400
 
@@ -111,10 +111,12 @@ MuseScore {
     onRun: {
         lastScoreName = curScore ? String(curScore.scoreName) : ""
         loadDeviceToken()
-        if (deviceToken === "")
-            say("bot", "Welcome to Bach Editor. Click Connect to pair this installation with your Nzumari account.", "", "")
-        else
+        if (deviceToken === "") {
+            say("bot", "Welcome to Bach Editor. Opening Nzumari sign-in so you can connect this installation.", "", "")
+            Qt.callLater(function() { beginPairing() })
+        } else {
             say("bot", "Connected to Nzumari Bach. Ask me to change the open score in plain language. Your edits remain local to MuseScore and one Ctrl+Z undoes each request.", "", "")
+        }
         placeTimer.start()
     }
 
@@ -213,7 +215,7 @@ MuseScore {
                    text: "BACH AI"; font.bold: true; font.pixelSize: 12; font.letterSpacing: 1; color: cText }
             Row {
                 anchors { right: parent.right; rightMargin: 8; top: parent.top; topMargin: 4 } spacing: 4
-                Button { text: deviceToken === "" ? "Connect" : "Disconnect"; flat: true; font.pixelSize: 11
+                Button { text: deviceToken === "" ? "Sign in" : "Disconnect"; flat: true; font.pixelSize: 11
                          enabled: !busy; onClicked: { if (deviceToken === "") beginPairing(); else disconnectDevice() } }
                 Button { text: "New chat"; flat: true; font.pixelSize: 11; enabled: !busy
                          onClicked: { chat.clear(); resetRequest(); bachConversationId = ""; sentCount = 0
