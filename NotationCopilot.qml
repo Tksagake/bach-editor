@@ -270,7 +270,7 @@ MuseScore {
                 Text { text: pairingDeviceCode !== "" ? "WAITING FOR APPROVAL" : (pairingStarting ? "CONNECTING TO NZUMARI…" : "BACH IS NOT CONNECTED")
                        font.pixelSize: 11; font.bold: true; color: cText }
                 Text { width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 11; color: cMuted
-                       text: pairingDeviceCode !== "" ? "Approve the pairing request in your browser. Code: " + pairingDeviceCode + "\\n" + pairingPollStatus
+                       text: pairingDeviceCode !== "" ? "Approve the pairing request in your browser. Code: " + pairingDeviceCode + "\n" + pairingPollStatus
                              : "Connect this MuseScore installation to your Nzumari account to use Bach AI." }
                 Button { text: pairingStarting ? "Connecting…" : (pairingDeviceCode !== "" ? "Request pending…" : "Connect to Nzumari")
                          highlighted: true; enabled: !pairingStarting && pairingDeviceCode === ""
