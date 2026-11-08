@@ -28,13 +28,13 @@ import FileIO 3.0
 
 MuseScore {
     id: root
-    version: "0.8.3"
+    version: "0.9.0"
     title: "Bach AI"
     description: "Ask in plain language (any language) and the AI edits the open score: write melodies, scales, exercises and countermelodies, copy or clear bars, add dynamics and chord symbols, voice sections, write pads and bass lines. One Ctrl+Z undoes each request."
     categoryCode: "composing-arranging-tools"
     pluginType: "dock"
     requiresScore: true
-    width: 400; height: 760
+    width: 440; height: 760
 
     // ---- Nzumari connection ----
     property string mode: "local"
@@ -47,7 +47,7 @@ MuseScore {
     property string python: "python"
     property string copilot: pluginDir() + "copilot.py"
     property string workDir: ""
-    property int sidebarWidth: 400
+    property int sidebarWidth: 440
 
     // Conversation state for the request in flight.
     property string instruction: ""      // original request text
@@ -66,14 +66,14 @@ MuseScore {
                                      "Double the melody in the strings in bars 1-8"]
     readonly property bool showExamples: sentCount === 0 && !busy && deviceToken !== ""
 
-    readonly property color cBg: "#f7f8fa"
-    readonly property color cUser: "#0b6bcb"
-    readonly property color cBot: "#ffffff"
-    readonly property color cBorder: "#d9dde3"
-    readonly property color cText: "#1f2328"
-    readonly property color cMuted: "#656d76"
-    readonly property color cBorderLight: "#e9ecf0"
-    readonly property color cInputBg: "#fafbfc"
+    readonly property color cBg: "#F7F5EF"
+    readonly property color cUser: "#173B30"
+    readonly property color cBot: "#FFFFFF"
+    readonly property color cBorder: "#DED8CB"
+    readonly property color cText: "#293B32"
+    readonly property color cMuted: "#7A887F"
+    readonly property color cBorderLight: "#E6E8E2"
+    readonly property color cInputBg: "#FFFFFF"
 
     QProcess { id: proc }
     FileIO { id: fio }
@@ -206,117 +206,239 @@ MuseScore {
         }
     }
 
-    // ---------- UI ----------
+    // ---------- Nzumari / Bach interface ----------
     Rectangle {
-        anchors.fill: parent; color: cBg
+        anchors.fill: parent
+        color: cBg
 
-        Rectangle {   // header
-            id: header; anchors { left: parent.left; right: parent.right; top: parent.top }
-            height: 40; color: "#ffffff"
-            Rectangle { anchors { left: parent.left; right: parent.right; bottom: parent.bottom } height: 1; color: cBorder }
-            Text { id: titleText; anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
-                   text: "BACH AI"; font.bold: true; font.pixelSize: 12; font.letterSpacing: 1; color: cText }
-            Row {
-                anchors { right: parent.right; rightMargin: 8; top: parent.top; topMargin: 4 } spacing: 4
-                Button { visible: deviceToken !== ""; text: "Disconnect"; flat: true; font.pixelSize: 11
-                         enabled: !busy; onClicked: disconnectDevice() }
-                Button { text: "New chat"; flat: true; font.pixelSize: 11; enabled: !busy
-                         onClicked: { chat.clear(); resetRequest(); bachConversationId = ""; sentCount = 0
-                                      say("bot", "New Bach conversation. Tell me what to change in the open score.", "", "") } }
-                Button { text: "Close"; flat: true; font.pixelSize: 11; onClicked: root.quit() }
+        // Brand header
+        Rectangle {
+            id: header
+            anchors { left: parent.left; right: parent.right; top: parent.top }
+            height: 78
+            color: "#173B30"
+
+            Rectangle { anchors { left: parent.left; top: parent.top; bottom: parent.bottom }; width: 4; color: "#C6A66B" }
+
+            Column {
+                anchors { left: parent.left; leftMargin: 18; verticalCenter: parent.verticalCenter }
+                spacing: 3
+                Text {
+                    text: "NZUMARI  /  NOTATION STUDIO"
+                    color: "#C6A66B"; font.pixelSize: 9; font.bold: true; font.letterSpacing: 1.4
+                }
+                Text {
+                    text: "Bach"
+                    color: "#FFFFFF"; font.pixelSize: 25; font.weight: Font.DemiBold
+                }
+            }
+
+            Column {
+                anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
+                spacing: 4
+                Button {
+                    text: "New chat"
+                    height: 27
+                    enabled: !busy
+                    onClicked: {
+                        chat.clear(); resetRequest(); bachConversationId = ""; sentCount = 0
+                        say("bot", "A fresh conversation. Tell me what you would like to change in the open score.", "", "")
+                    }
+                    contentItem: Text { text: parent.text; color: "#FFFFFF"; font.pixelSize: 11; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { radius: 6; color: parent.pressed ? "#31594D" : "#244B3F"; border.color: "#547365" }
+                }
+                Row {
+                    spacing: 5
+                    Button {
+                        visible: deviceToken !== ""
+                        text: "Disconnect"
+                        height: 23
+                        enabled: !busy
+                        onClicked: disconnectDevice()
+                        contentItem: Text { text: parent.text; color: "#E8D8B8"; font.pixelSize: 10; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                        background: Rectangle { radius: 5; color: "transparent"; border.color: "#6D887C" }
+                    }
+                    Button {
+                        text: "Close"
+                        height: 23
+                        onClicked: root.quit()
+                        contentItem: Text { text: parent.text; color: "#D5E1DA"; font.pixelSize: 10; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                        background: Rectangle { radius: 5; color: "transparent"; border.color: "#6D887C" }
+                    }
+                }
             }
         }
 
-        Rectangle {   // persistent connection panel when this installation is not authorised
+        // Active score context
+        Rectangle {
+            id: contextBar
+            anchors { left: parent.left; right: parent.right; top: header.bottom }
+            height: 38
+            color: "#F0EDE5"
+            Rectangle { anchors { left: parent.left; right: parent.right; bottom: parent.bottom }; height: 1; color: "#DED8CB" }
+            Row {
+                anchors { left: parent.left; leftMargin: 16; right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
+                spacing: 8
+                Rectangle { width: 7; height: 7; radius: 4; color: deviceToken !== "" ? "#4D876C" : "#B58A4B"; anchors.verticalCenter: parent.verticalCenter }
+                Text {
+                    text: curScore ? String(curScore.scoreName) : "No score open"
+                    color: "#34483F"; font.pixelSize: 11; font.weight: Font.DemiBold
+                    elide: Text.ElideRight; width: parent.width - 100
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                Text {
+                    text: deviceToken !== "" ? "CONNECTED" : "OFFLINE"
+                    color: deviceToken !== "" ? "#3E725A" : "#8A6B3F"
+                    font.pixelSize: 9; font.bold: true; font.letterSpacing: 0.7
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+            }
+        }
+
+        // Connection onboarding
+        Rectangle {
             id: connectionPanel
             visible: deviceToken === ""
-            anchors { left: parent.left; right: parent.right; top: header.bottom; margins: 10 }
-            height: 132
-            radius: 10
-            color: "#ffffff"
-            border.color: cBorder
+            anchors { left: parent.left; right: parent.right; top: contextBar.bottom; margins: 12 }
+            height: pairingDeviceCode !== "" ? 174 : 154
+            radius: 12
+            color: "#FFFFFF"
+            border.color: "#DED8CB"
             Column {
-                anchors { fill: parent; margins: 12 }
-                spacing: 6
-                Text { text: pairingDeviceCode !== "" ? "WAITING FOR APPROVAL" : (pairingStarting ? "CONNECTING TO NZUMARI…" : "BACH IS NOT CONNECTED")
-                       font.pixelSize: 11; font.bold: true; color: cText }
-                Text { width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 11; color: cMuted
-                       text: pairingDeviceCode !== "" ? "Approve the pairing request in your browser. Code: " + pairingDeviceCode
-                             : "Connect this MuseScore installation to your Nzumari account to use Bach AI." }
-                Button { text: pairingStarting ? "Connecting…" : (pairingDeviceCode !== "" ? "Request pending…" : "Connect to Nzumari")
-                         highlighted: true; enabled: !pairingStarting && pairingDeviceCode === ""
-                         onClicked: beginPairing() }
+                anchors { fill: parent; margins: 15 }
+                spacing: 8
+                Text {
+                    text: pairingDeviceCode !== "" ? "AUTHORISATION REQUIRED" : (pairingStarting ? "CONTACTING NZUMARI…" : "CONNECT BACH TO NZUMARI")
+                    color: "#173B30"; font.pixelSize: 11; font.bold: true; font.letterSpacing: 0.8
+                }
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap
+                    text: pairingDeviceCode !== "" ? "A browser approval is waiting. Complete the sign-in to link this MuseScore installation."
+                                                     : "Sign in to your Nzumari account to use Bach with your own projects and notation workflow."
+                    color: "#66736B"; font.pixelSize: 12; lineHeight: 1.2
+                }
+                Rectangle {
+                    visible: pairingDeviceCode !== ""
+                    width: parent.width; height: 34; radius: 6
+                    color: "#F6F1E7"; border.color: "#E5D5B4"
+                    Row {
+                        anchors.centerIn: parent; spacing: 8
+                        Text { text: "PAIRING CODE"; color: "#8A7655"; font.pixelSize: 9; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                        Text { text: pairingDeviceCode; color: "#173B30"; font.pixelSize: 16; font.bold: true; font.letterSpacing: 2; anchors.verticalCenter: parent.verticalCenter }
+                    }
+                }
+                Button {
+                    text: pairingStarting ? "Connecting…" : (pairingDeviceCode !== "" ? "Waiting for browser approval" : "Connect to Nzumari")
+                    enabled: !pairingStarting && pairingDeviceCode === ""
+                    height: 34
+                    onClicked: beginPairing()
+                    contentItem: Text { text: parent.text; color: "#FFFFFF"; font.pixelSize: 12; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { radius: 7; color: parent.enabled ? (parent.pressed ? "#102D24" : "#173B30") : "#82958C" }
+                }
             }
         }
 
+        // Conversation
         ListView {
             id: list
-            anchors { left: parent.left; right: parent.right; top: connectionPanel.visible ? connectionPanel.bottom : header.bottom
-                      bottom: showExamples ? examplesBox.top : composer.top; margins: 10 }
-            clip: true; spacing: 10; model: chat
-            ScrollBar.vertical: ScrollBar {}
+            anchors {
+                left: parent.left; right: parent.right
+                top: connectionPanel.visible ? connectionPanel.bottom : contextBar.bottom
+                bottom: showExamples ? examplesBox.top : composer.top
+                leftMargin: 12; rightMargin: 12; topMargin: 12; bottomMargin: 10
+            }
+            clip: true
+            spacing: 14
+            model: chat
+            ScrollBar.vertical: ScrollBar { active: true }
             onCountChanged: Qt.callLater(function() { list.positionViewAtEnd() })
+
             delegate: Item {
-                id: row
+                id: messageRow
                 width: list.width
-                height: bubble.height + (who.visible ? who.height + 10 : 0)
+                height: bubble.height + (who.visible ? 24 : 0)
                 property bool mine: model.role === "user"
                 property var opts: model.opts === "" ? [] : model.opts.split("\n")
-                property string msgTime: Qt.formatTime(new Date(), "hh:mm")
 
-                Text { id: who; visible: model.role !== "status"; text: mine ? "You" : "Copilot"
-                       font.pixelSize: 10; font.bold: true; color: cMuted
-                       anchors.right: mine ? parent.right : undefined; anchors.left: mine ? undefined : parent.left
-                       anchors.top: parent.top; anchors.topMargin: mine ? 0 : 2 }
-
-                Text { id: timeStamp; visible: model.role !== "status"; text: msgTime
-                       font.pixelSize: 9; font.bold: true; color: cMuted
-                       opacity: 0.6
-                       anchors.right: mine ? parent.right : undefined; anchors.left: mine ? undefined : parent.left
-                       anchors.top: who.bottom; anchors.topMargin: 2 }
+                Text {
+                    id: who
+                    visible: model.role !== "status"
+                    text: mine ? "YOU" : (model.role === "error" ? "BACH  ·  NOTICE" : "BACH")
+                    font.pixelSize: 9; font.bold: true; font.letterSpacing: 0.8
+                    color: model.role === "error" ? "#8B3D43" : "#7A887F"
+                    anchors { top: parent.top; left: mine ? undefined : parent.left; right: mine ? parent.right : undefined }
+                }
 
                 Rectangle {
                     id: bubble
-                    y: who.visible ? timeStamp.bottom + 4 : 0
-                    width: Math.min(list.width - (mine ? 52 : 12), Math.max(body.implicitWidth, 60) + 24)
-                    height: col.height + 18
-                    anchors.right: mine ? parent.right : undefined
-                    anchors.left: mine ? undefined : parent.left
-                    anchors.leftMargin: mine ? 0 : 12
-                    radius: 10
-                    color: mine ? cUser : (model.role === "status" ? "transparent"
-                           : (model.role === "error" ? "#fff1f0" : (model.kind !== "" ? "#fffbf0" : cBot)))
-                    border.color: mine ? "transparent" : (model.role === "error" ? "#f5c2c0" : (model.kind !== "" ? "#f0d58c" : cBorderLight))
-                    border.width: mine ? 0 : 1
+                    y: who.visible ? who.height + 6 : 0
+                    width: Math.min(list.width - 20, Math.max(120, body.width + 28))
+                    height: messageColumn.height + 22
+                    anchors { left: mine ? undefined : parent.left; right: mine ? parent.right : undefined }
+                    radius: 11
+                    color: mine ? "#173B30" : (model.role === "status" ? "transparent" : (model.role === "error" ? "#F9EEEE" : (model.kind !== "" ? "#FBF6E9" : "#FFFFFF")))
+                    border.width: mine || model.role === "status" ? 0 : 1
+                    border.color: model.role === "error" ? "#E7C8C8" : (model.kind !== "" ? "#E5D5B4" : "#E6E8E2")
 
                     Column {
-                        id: col; x: 12; y: 9; width: bubble.width - 24; spacing: 6
-                        Text { id: body; width: Math.min(implicitWidth, list.width - 72 - (mine ? 52 : 0))
-                               text: model.text; wrapMode: Text.Wrap; textFormat: Text.PlainText
-                               font.pixelSize: 13; font.italic: model.role === "status"
-                               color: mine ? "#ffffff" : (model.role === "status" ? cMuted : cText) }
-                        Text { visible: model.detail !== ""; width: body.width; text: model.detail
-                               wrapMode: Text.Wrap; font.pixelSize: 10; font.family: "Consolas, 'Courier New', monospace"; color: cMuted
-                               opacity: 0.8 }
+                        id: messageColumn
+                        x: 14; y: 11; width: bubble.width - 28
+                        spacing: 8
+                        Text {
+                            id: body
+                            width: Math.min(implicitWidth, list.width - 58)
+                            text: model.text
+                            wrapMode: Text.WordWrap
+                            textFormat: Text.PlainText
+                            font.pixelSize: 13
+                            lineHeight: 1.25
+                            color: mine ? "#FFFFFF" : (model.role === "status" ? "#7A887F" : (model.role === "error" ? "#71383C" : "#293B32"))
+                            font.italic: model.role === "status"
+                        }
+                        Text {
+                            visible: model.detail !== ""
+                            width: messageColumn.width
+                            text: model.detail
+                            wrapMode: Text.WordWrap
+                            font.pixelSize: 10
+                            font.family: "Consolas, 'Courier New', monospace"
+                            color: mine ? "#D5E1DA" : "#77847C"
+                        }
                         Repeater {
-                            model: row.opts
+                            model: messageRow.opts
                             delegate: Button {
-                                width: col.width; enabled: row.isLive() && !busy
-                                contentItem: Text { text: modelData; wrapMode: Text.Wrap; font.pixelSize: 12
-                                                    color: parent.enabled ? cUser : cMuted }
+                                width: messageColumn.width
+                                height: Math.max(32, optionText.implicitHeight + 14)
+                                enabled: messageRow.isLive() && !busy
+                                contentItem: Text {
+                                    id: optionText
+                                    text: modelData; wrapMode: Text.WordWrap
+                                    font.pixelSize: 11; color: parent.enabled ? "#315F4D" : "#87938B"
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle { radius: 6; color: parent.pressed ? "#E8E0CF" : "#FFFFFF"; border.color: "#D8C9A8" }
                                 onClicked: pickOption(modelData)
                             }
                         }
-                        Button {   // 402: open the buy-credits page in the browser
-                            visible: model.url !== ""; text: "Upgrade / buy edits"; highlighted: true
+                        Button {
+                            visible: model.url !== ""
+                            text: "Upgrade / buy edits"
+                            highlighted: true
                             onClicked: Qt.openUrlExternally(model.url)
                         }
                         Row {
-                            spacing: 8; visible: model.kind !== "" && row.isLive()
-                            Button { text: "Apply anyway"; highlighted: true; enabled: !busy
-                                     onClicked: forceApply() }
-                            Button { text: "Cancel"; flat: true; enabled: !busy
-                                     onClicked: { resetRequest(); say("status", "Request cancelled.", "", "") } }
+                            spacing: 8
+                            visible: model.kind !== "" && messageRow.isLive()
+                            Button {
+                                text: "Apply anyway"; enabled: !busy
+                                onClicked: forceApply()
+                                contentItem: Text { text: parent.text; color: "#FFFFFF"; font.pixelSize: 11; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                background: Rectangle { radius: 6; color: "#173B30" }
+                            }
+                            Button {
+                                text: "Cancel"; flat: true; enabled: !busy
+                                onClicked: { resetRequest(); say("status", "Request cancelled.", "", "") }
+                            }
                         }
                     }
                 }
@@ -324,26 +446,31 @@ MuseScore {
             }
         }
 
-        Column {   // first-open example prompts
+        // Helpful first actions
+        Column {
             id: examplesBox
             visible: showExamples
-            anchors { left: parent.left; right: parent.right; bottom: composer.top
-                      leftMargin: 10; rightMargin: 10; bottomMargin: 8 }
+            anchors { left: parent.left; right: parent.right; bottom: composer.top; leftMargin: 14; rightMargin: 14; bottomMargin: 10 }
             spacing: 8
-            Text { text: "Try one of these:"; font.pixelSize: 12; font.bold: true; color: cMuted }
-            Row {
-                spacing: 8
+            Text { text: "START WITH A TASK"; font.pixelSize: 9; font.bold: true; font.letterSpacing: 0.8; color: "#7A887F" }
+            Grid {
+                width: parent.width
+                columns: 2
+                spacing: 7
                 Repeater {
                     model: examples
                     delegate: Button {
-                        width: (examplesBox.width - 24) / 3
-                        height: 44
-                        contentItem: Text { text: modelData; wrapMode: Text.Wrap; font.pixelSize: 11; color: cUser }
+                        width: (examplesBox.width - 7) / 2
+                        height: 45
+                        contentItem: Text {
+                            text: modelData; wrapMode: Text.WordWrap
+                            font.pixelSize: 10; color: "#315F4D"
+                            horizontalAlignment: Text.AlignLeft; verticalAlignment: Text.AlignVCenter
+                        }
                         background: Rectangle {
-                            color: parent.pressed ? "#eef2f6" : cInputBg
-                            radius: 10
-                            border.color: cBorderLight
-                            border.width: 1
+                            radius: 7
+                            color: parent.pressed ? "#E9E4D8" : "#FFFFFF"
+                            border.color: "#E0DED5"
                         }
                         onClicked: useExample(modelData)
                     }
@@ -351,29 +478,26 @@ MuseScore {
             }
         }
 
-        Rectangle {   // composer
+        // Message composer
+        Rectangle {
             id: composer
-            anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: 10 }
-            height: input.height + 46; radius: 10; color: cInputBg
-            border.color: input.activeFocus ? cUser : cBorderLight
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: 12 }
+            height: input.height + 54
+            radius: 12
+            color: "#FFFFFF"
             border.width: 1
-
-            Rectangle {
-                anchors { fill: input; margins: -6 }
-                radius: 10
-                color: "#ffffff"
-                border.color: input.activeFocus ? cUser : cBorderLight
-                border.width: 1
-            }
+            border.color: input.activeFocus ? "#8AA392" : "#DED8CB"
 
             TextArea {
                 id: input
-                anchors { left: parent.left; right: parent.right; top: parent.top; margins: 6 }
-                height: Math.min(Math.max(contentHeight + 12, 40), 120)
-                wrapMode: TextEdit.Wrap; font.pixelSize: 13; enabled: !busy
+                anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 12; rightMargin: 12; topMargin: 9 }
+                height: Math.min(Math.max(contentHeight + 12, 42), 94)
+                wrapMode: TextEdit.Wrap
+                font.pixelSize: 13
+                color: "#293B32"
+                enabled: !busy && deviceToken !== ""
                 background: null
-                placeholderText: pendingKind === "clarify" ? "Answer the question, or click an option above"
-                                                           : "Ask Copilot to change the score (Enter to send)"
+                placeholderText: pendingKind === "clarify" ? "Answer Bach's question…" : "Describe the change you want…"
                 Keys.onPressed: function(e) {
                     if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter) && !(e.modifiers & Qt.ShiftModifier)) {
                         e.accepted = true; send()
@@ -381,16 +505,26 @@ MuseScore {
                 }
             }
 
-            Text { anchors { left: parent.left; leftMargin: 10; bottom: parent.bottom; bottomMargin: 10 }
-                   font.pixelSize: 11; color: cMuted
-                   text: busy ? "Working" + ".".repeat(1 + elapsed % 3) + "  " + elapsed + "s"
-                              : "Edits apply to the open score (Ctrl+Z undoes)" }
+            Row {
+                anchors { left: parent.left; leftMargin: 12; bottom: parent.bottom; bottomMargin: 9 }
+                spacing: 6
+                Text {
+                    text: busy ? "WORKING  ·  " + elapsed + "s" : "OPEN SCORE  ·  LOCAL EDITS"
+                    color: busy ? "#8A6B3F" : "#839087"
+                    font.pixelSize: 9; font.bold: true; font.letterSpacing: 0.4
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                Text { text: busy ? " " + ".".repeat(1 + elapsed % 3) : "·  Ctrl+Z to undo"; color: "#A1AAA3"; font.pixelSize: 9; anchors.verticalCenter: parent.verticalCenter }
+            }
 
             Button {
-                anchors { right: parent.right; rightMargin: 8; bottom: parent.bottom; bottomMargin: 8 }
-                text: pendingKind === "clarify" ? "Answer" : "Send"; highlighted: true
-                enabled: !busy && input.text.trim() !== ""
+                anchors { right: parent.right; rightMargin: 9; bottom: parent.bottom; bottomMargin: 7 }
+                text: pendingKind === "clarify" ? "Answer" : "Send"
+                enabled: !busy && deviceToken !== "" && input.text.trim() !== ""
+                height: 32; width: 74
                 onClicked: send()
+                contentItem: Text { text: parent.text; color: "#FFFFFF"; font.pixelSize: 11; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                background: Rectangle { radius: 7; color: parent.enabled ? (parent.pressed ? "#102D24" : "#173B30") : "#AAB6AE" }
             }
         }
     }
