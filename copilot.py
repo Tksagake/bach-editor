@@ -19,20 +19,20 @@ from urllib.error import HTTPError, URLError
 
 TPQ = 480  # MuseScore internal ticks per quarter note (hardcoded in QML applyEdits)
 
-# PREVIEW TEST ONLY — switch to production before merging this branch.
+# All AI requests are routed through the Nzumari Bach API. No local model/provider calls.
 NZUMARI_BASE_URL = "https://nzumari.vivaceke.co.ke"
 
 # ---------------------------------------------------------------------------
 # Error reporting — QML reads stdout, finds first line starting with '{', parses JSON.
 # ---------------------------------------------------------------------------
 
-def print_error_and_exit(message: str, buy_url: str = "") -> None:
-    """Fails safely by returning a valid JSON error to the QML via stdout."""
-    err = {
-        "status": "error",
-        "message": message,
-        "buy_url": buy_url,
-    }
+def print_error_and_exit(message: str, code: str = "", request_id: str = "") -> None:
+    """Return a structured Nzumari API error to the MuseScore plugin."""
+    err = {"status": "error", "message": message}
+    if code:
+        err["code"] = code
+    if request_id:
+        err["request_id"] = request_id
     print(json.dumps(err))
     sys.exit(1)
 
@@ -499,9 +499,13 @@ def call_bach_editor(
         try:
             detail = json.loads(error.read().decode("utf-8"))
             message = detail.get("error") or "Bach Editor request failed."
+            code = str(detail.get("code") or "")
+            request_id = str(detail.get("requestId") or "")
         except Exception:
             message = "Bach Editor request failed (HTTP %s)." % error.code
-        print_error_and_exit(message)
+            code = ""
+            request_id = ""
+        print_error_and_exit(message, code=code, request_id=request_id)
     except (URLError, TimeoutError, OSError) as error:
         print_error_and_exit("Could not reach Nzumari Bach: %s" % error)
 

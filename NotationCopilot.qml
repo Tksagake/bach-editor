@@ -1,7 +1,8 @@
 // Bach Editor -- MuseScore 4 notation integration.
-// Author: AiHud (https://copilot.aihud.net, hi@aihud.net)
-// Copyright (C) 2026 AiHud. Licensed under the GNU GPL v3 or later:
-// https://copilot.aihud.net/LICENSE  Source: https://copilot.aihud.net/source
+// Upstream-derived portions: Copyright (C) 2026 AiHud.
+// Licensed under the GNU GPL v3 or later; retain this notice under the licence.
+// https://copilot.aihud.net/LICENSE | https://copilot.aihud.net/source
+// Nzumari authentication, API integration and product branding are maintained here.
 //
 // DOCKING: MuseScore Studio 4.7.5 cannot dock plugins. The legacy loader maps
 // pluginType "dock" to the same floating dialog as "dialog" (verified empirically
@@ -18,8 +19,8 @@
 // inside one startCmd()/endCmd(), so a single Ctrl+Z undoes the whole request. Every request
 // re-exports the score, so follow-ups build on it, including any manual edits.
 //
-// Install: copy into ~/Documents/MuseScore4/Plugins/NotationCopilot/, restart MuseScore,
-// Home > Plugins > Notation Copilot > Enable. Run: Plugins > Composing/arranging tools > Notation Copilot.
+// Install this folder under ~/Documents/MuseScore4/Plugins/, restart MuseScore,
+// then enable and launch Bach AI from Home > Plugins.
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Window 2.15
@@ -37,10 +38,19 @@ MuseScore {
     width: 400; height: 760
 
     // MuseScore exposes the directory containing this QML file as filePath.
-    // Keep one shared resolver for copilot.py, credentials and temporary job files.
+    // Keep one shared resolver for the Nzumari API client, credentials and temporary job files.
+    function urlToPath(u) {
+        var s = String(u)
+        if (/^file:\/\/\//i.test(s)) s = s.substring(7)
+        else if (/^file:\/\//i.test(s)) s = "//" + s.substring(7)
+        else if (/^file:/i.test(s)) s = s.substring(5)
+        try { s = decodeURIComponent(s) } catch (e) { }
+        if (/^\/[A-Za-z]:/.test(s)) s = s.substring(1)
+        return s
+    }
     function pluginDir() {
-        var p = String(filePath || "").replace(/[\\/]+$/, "")
-        return p === "" ? "" : p + "/"
+        var d = urlToPath(Qt.resolvedUrl("."))
+        return /\/$/.test(d) ? d : d + "/"
     }
 
     // ---- Nzumari connection ----
@@ -50,6 +60,8 @@ MuseScore {
     property string deviceToken: ""                 // scoped Nzumari device token
     property string pairingDeviceCode: ""
     property bool pairingStarting: false
+    property bool pairingPollInFlight: false
+    property string pairingPollStatus: "Waiting for first check"
     property string bachConversationId: ""
     property string python: "python"
     property string copilot: pluginDir() + "copilot.py"
@@ -183,17 +195,29 @@ MuseScore {
         id: pairingPoll; interval: 3000; repeat: true
         onTriggered: {
             if (pairingDeviceCode === "") { stop(); return }
+            // Do not let a slow request overlap the next timer tick. The server
+            // consumes the device code when it issues the one-time access token.
+            if (pairingPollInFlight) return
+            pairingPollInFlight = true
+            var pollCode = pairingDeviceCode
+            pairingPollStatus = "Checking Nzumari…"
             var x = new XMLHttpRequest()
             x.onreadystatechange = function() {
                 if (x.readyState !== XMLHttpRequest.DONE) return
+                pairingPollInFlight = false
+                // Ignore late responses from a previous pairing attempt.
+                if (pairingDeviceCode !== pollCode) return
                 var r = null
                 try { r = JSON.parse(x.responseText) } catch (e) {}
+                console.log("Bach pairing poll: HTTP " + x.status + " · " + (r && r.status ? r.status : "no JSON status"))
                 if (x.status !== 200 || !r) {
                     stop(); pairingDeviceCode = ""
-                    say("error", (r && r.error) || "Could not complete Nzumari pairing.", "", "")
+                    pairingPollStatus = "Request failed (HTTP " + x.status + ")"
+                    say("error", (r && r.error) || ("Could not complete Nzumari pairing (HTTP " + x.status + ")."), "", "")
                     return
                 }
-                if (r.status === "authorized") {
+                pairingPollStatus = "Nzumari says: " + String(r.status || "unknown")
+                if (r.status === "authorized" && r.accessToken) {
                     stop(); pairingDeviceCode = ""; deviceToken = r.accessToken
                     fio.source = tokenPath()
                     var saved = false
@@ -204,18 +228,20 @@ MuseScore {
                     }
                     if (!saved) {
                         deviceToken = ""
+                        pairingPollStatus = "Approved, but token save failed"
                         say("error", "Nzumari approved this device, but MuseScore could not save and verify the token at: " + tokenPath(), "", "")
                         return
                     }
+                    pairingPollStatus = "Connected and token saved"
                     say("bot", "Connected to Nzumari. This device credential has been saved for future MuseScore sessions.", "", "")
-                } else if (r.status === "expired" || r.status === "invalid" || r.status === "revoked") {
+                } else if (r.status === "expired" || r.status === "invalid" || r.status === "revoked" || r.status === "consumed") {
                     stop(); pairingDeviceCode = ""
-                    say("error", "The pairing request expired or is no longer valid. Click Connect to try again.", "", "")
+                    say("error", "The pairing request is no longer valid (" + r.status + "). Click Connect to try again.", "", "")
                 }
             }
             x.open("POST", serverUrl + "/api/bach/editor/device")
             x.setRequestHeader("Content-Type", "application/json")
-            x.send(JSON.stringify({ action: "token", deviceCode: pairingDeviceCode }))
+            x.send(JSON.stringify({ action: "token", deviceCode: pollCode }))
         }
     }
 
@@ -254,7 +280,7 @@ MuseScore {
                 Text { text: pairingDeviceCode !== "" ? "WAITING FOR APPROVAL" : (pairingStarting ? "CONNECTING TO NZUMARI…" : "BACH IS NOT CONNECTED")
                        font.pixelSize: 11; font.bold: true; color: cText }
                 Text { width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 11; color: cMuted
-                       text: pairingDeviceCode !== "" ? "Approve the pairing request in your browser. Code: " + pairingDeviceCode
+                       text: pairingDeviceCode !== "" ? "Approve the pairing request in your browser. Code: " + pairingDeviceCode + "\n" + pairingPollStatus
                              : "Connect this MuseScore installation to your Nzumari account to use Bach AI." }
                 Button { text: pairingStarting ? "Connecting…" : (pairingDeviceCode !== "" ? "Request pending…" : "Connect to Nzumari")
                          highlighted: true; enabled: !pairingStarting && pairingDeviceCode === ""
@@ -320,10 +346,6 @@ MuseScore {
                                 onClicked: pickOption(modelData)
                             }
                         }
-                        Button {   // 402: open the buy-credits page in the browser
-                            visible: model.url !== ""; text: "Upgrade / buy edits"; highlighted: true
-                            onClicked: Qt.openUrlExternally(model.url)
-                        }
                         Row {
                             spacing: 8; visible: model.kind !== "" && row.isLive()
                             Button { text: "Apply anyway"; highlighted: true; enabled: !busy
@@ -386,7 +408,7 @@ MuseScore {
                 wrapMode: TextEdit.Wrap; font.pixelSize: 13; enabled: !busy
                 background: null
                 placeholderText: pendingKind === "clarify" ? "Answer the question, or click an option above"
-                                                           : "Ask Copilot to change the score (Enter to send)"
+                                                           : "Ask Bach to change the score (Enter to send)"
                 Keys.onPressed: function(e) {
                     if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter) && !(e.modifiers & Qt.ShiftModifier)) {
                         e.accepted = true; send()
@@ -409,10 +431,10 @@ MuseScore {
     }
 
     // ---------- conversation logic ----------
-    function say(role, text, kind, opts, detail, url) {
+    function say(role, text, kind, opts, detail) {
         for (var i = 0; i < chat.count; i++) chat.setProperty(i, "live", false)
         chat.append({ role: role, text: text, kind: kind || "", opts: opts || "",
-                      detail: detail || "", live: (kind || "") !== "", url: url || "" })
+                      detail: detail || "", live: (kind || "") !== "" })
     }
     // Example chip: fill the box (user may change the bar numbers), focus it, cursor at the end. Never sends.
     function useExample(t) {
@@ -439,9 +461,9 @@ MuseScore {
         sentCount++
         if (pendingKind === "clarify") {
             addAnswer(t)
-            runCopilot(false)
+            runBach(false)
         } else {
-            resetRequest(); instruction = t; runCopilot(false)
+            resetRequest(); instruction = t; runBach(false)
         }
     }
     function pickOption(o) {
@@ -452,16 +474,16 @@ MuseScore {
         }
         say("user", o, "", "")
         addAnswer(o)
-        runCopilot(false)
+        runBach(false)
     }
     function forceApply() {
         say("user", "Apply anyway", "", "")
         if (pendingKind === "clarify")
             addAnswer("No more detail; use your best judgement.")
-        runCopilot(true)
+        runBach(true)
     }
 
-    function runCopilot(force) {
+    function runBach(force) {
         if (!curScore) { say("error", "Open a score first.", "", ""); return }
         var target = curScore.scoreName
         if (deviceToken === "") { beginPairing(); return }
@@ -519,7 +541,7 @@ MuseScore {
             elapsed++
             fio.source = job.done
             if (!fio.exists()) {
-                if (elapsed > 300) { stop(); busy = false; say("error", "Copilot timed out.", "", "") }
+                if (elapsed > 300) { stop(); busy = false; say("error", "Bach timed out.", "", "") }
                 return
             }
             stop(); busy = false
@@ -549,14 +571,14 @@ MuseScore {
             say("error", "Something went wrong (exit " + rc + ").", "", "", txt.slice(-1500))
             resetRequest(); return
         }
-        if (rep.status === "applied") finishApplied(rep, rep.edits || [], rep.edit_notes || [], "", rep.edit_summary)
+        if (rep.status === "applied") finishApplied(rep, rep.edits || [], rep.edit_notes || [], rep.edit_summary)
         else say("bot", rep.message || head || "Nothing to change.", "", "", logText(rep))
         resetRequest()
     }
 
     function logText(rep) { return (rep.log || []).map(function(l) { return "- " + l }).join("\n") }
 
-    function finishApplied(rep, edits, notes, cost, summary, buyUrl) {
+    function finishApplied(rep, edits, notes, summary) {
         if (!curScore || curScore.scoreName !== job.target) {
             say("error", "The score \"" + job.target + "\" is no longer the active score, so nothing was changed. "
                 + "Switch back to it and ask again.", "", ""); return
@@ -574,7 +596,7 @@ MuseScore {
         var msg = "Changed " + (where.length ? where.join("; ") : (rep.message || "the score"))
         var extra = notes.concat(res.problems)
         say("bot", msg + " — Ctrl+Z to undo." + (extra.length ? "\nNote: " + extra.join("; ") + "." : ""),
-            "", "", logText(rep) + cost, buyUrl || "")
+            "", "", logText(rep))
     }
 
     // ---------- in-place edits (see edits.py for the op format) ----------
