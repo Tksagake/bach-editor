@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 TPQ = 480  # MuseScore internal ticks per quarter note (hardcoded in QML applyEdits)
 
 # PREVIEW TEST ONLY — switch to production before merging this branch.
-NZUMARI_BASE_URL = "https://nzumari-b1x2bcmr6-sikoleer.vercel.app"
+NZUMARI_BASE_URL = "https://nzumari.vivaceke.co.ke"
 
 # ---------------------------------------------------------------------------
 # Error reporting — QML reads stdout, finds first line starting with '{', parses JSON.
