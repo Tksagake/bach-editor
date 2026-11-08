@@ -38,8 +38,8 @@ MuseScore {
 
     // ---- Nzumari connection ----
     property string mode: "local"
-    // PREVIEW TEST ONLY — switch to production before merging this branch.
-    property string serverUrl: "https://nzumari-b1x2bcmr6-sikoleer.vercel.app"
+    // Nzumari production API.
+    property string serverUrl: "https://nzumari.vivaceke.co.ke"
     property string deviceToken: ""                 // scoped Nzumari device token
     property string pairingDeviceCode: ""
     property string bachConversationId: ""
