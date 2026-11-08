@@ -421,19 +421,8 @@ MuseScore {
         var t = input.text.trim()
         if (t === "" || busy) return
         input.text = ""
-        if (/^nc_live_[A-Za-z0-9_-]{8,}$/.test(t)) {      // the user pasted their key
-            apiKey = t
-            fio.source = keyPath()
-            var saved = fio.write(t)
-            sayHello()
-            say("user", t.substring(0, 12) + "...", "", "")
-            say("bot", "Key " + (saved ? "saved" : "set for this session") + ". Now tell me what to change in this score, "
-                + "e.g. \"write a sustained string pad under bars 9-16\".", "", "")
-            return
-        }
         say("user", t, "", "")
-        if (mode === "hosted" && apiKey === "") { askForKey(); return }
-        if (needActivation && /^\d{3} ?\d{3}$/.test(t)) { codeInput.text = t; submitCode(); return }
+        if (apiKey === "") { beginPairing(); return }
         sentCount++
         if (pendingKind === "clarify") {
             addAnswer(t)
@@ -462,21 +451,8 @@ MuseScore {
     function runCopilot(force) {
         if (!curScore) { say("error", "Open a score first.", "", ""); return }
         var target = curScore.scoreName
-        if (mode === "hosted") {
-            // One fixed file (plugin folder, else system temp; see exportPath), overwritten each
-            // request and deleted after upload. No hard-coded Unix paths, no shell commands.
-            var src = exportPath()
-            // always export the OPEN score: follow-ups see earlier edits and manual changes
-            if (!writeScore(curScore, src, "musicxml")) {
-                say("error", "Could not export the score. I tried to save a temporary copy here:\n" + src
-                    + "\n\nPlease check that this folder exists and that you are allowed to write to it. "
-                    + "If it keeps happening, reinstall the plugin into your Documents\\MuseScore4\\Plugins folder "
-                    + "(the NotationCopilot folder goes inside Plugins) and restart MuseScore.", "", "")
-                return
-            }
-            postHosted(src, "", force, target); return
-        }
-        // ---- local (developer) mode, Linux/macOS ----
+        if (apiKey === "") { beginPairing(); return }
+        // Export the active score; the local parser creates the compact notation snapshot for Bach.
         var stamp = Date.now()
         var wd = workDir !== "" ? workDir.replace(/\/+$/, "") + "/" : pluginDir()
         if (workDir !== "") { proc.startWithArgs("mkdir", ["-p", wd]); proc.waitForFinished(5000) }
@@ -489,9 +465,9 @@ MuseScore {
         }
         var sh = wd + "run-" + stamp + ".sh"
         fio.source = sh
-        fio.write("[ -f " + shq(envFile) + " ] && { set -a; . " + shq(envFile) + "; set +a; }\n"
-                  + shq(python) + " " + shq(copilot) + " " + shq(src) + " " + shq(instruction)
-                  + historyArgs() + (force ? " --yes" : "") + " -o " + shq(dst) + " > " + shq(rep) + " 2>&1\n"
+        fio.write(shq(python) + " " + shq(copilot) + " " + shq(src) + " " + shq(instruction)
+                  + historyArgs() + (bachConversationId !== "" ? " --conversation-id " + shq(bachConversationId) : "")
+                  + (force ? " --yes" : "") + " -o " + shq(dst) + " > " + shq(rep) + " 2>&1\n"
                   + "echo $? > " + shq(done) + "\n")
         console.log("copilot launcher: " + sh)
         job = { rep: rep, dst: dst, done: done, hosted: false, target: target }
@@ -624,6 +600,7 @@ MuseScore {
         var j = txt.search(/^\{/m)
         if (j >= 0) { try { rep = JSON.parse(txt.substring(j)) } catch (e) { rep = null } }
         var head = (j >= 0 ? txt.substring(0, j) : txt).trim()
+        if (rep && rep.conversation_id) bachConversationId = String(rep.conversation_id)
 
         if (rep && rep.status === "question") {
             pendingKind = rep.kind; pendingQuestion = rep.question
