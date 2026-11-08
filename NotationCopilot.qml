@@ -145,6 +145,28 @@ MuseScore {
         x.setRequestHeader("Content-Type", "application/json")
         x.send(JSON.stringify({ action: "authorize", deviceName: "Bach Editor · MuseScore" }))
     }
+    function disconnectDevice() {
+        if (deviceToken === "") return
+        var x = new XMLHttpRequest()
+        x.onreadystatechange = function() {
+            if (x.readyState !== XMLHttpRequest.DONE) return
+            var r = null
+            try { r = JSON.parse(x.responseText) } catch (e) {}
+            if (x.status === 200 && r && r.revoked) {
+                fio.source = tokenPath()
+                try { fio.remove() } catch (e) {}
+                deviceToken = ""; bachConversationId = ""
+                say("bot", "This MuseScore installation has been disconnected from Nzumari.", "", "")
+            } else {
+                say("error", (r && r.error) || "Could not revoke this device credential.", "", "")
+            }
+        }
+        x.open("POST", serverUrl + "/api/bach/editor/device")
+        x.setRequestHeader("Content-Type", "application/json")
+        x.setRequestHeader("Authorization", "Bearer " + deviceToken)
+        x.send(JSON.stringify({ action: "revoke" }))
+    }
+
     Timer {
         id: pairingPoll; interval: 3000; repeat: true
         onTriggered: {
@@ -191,8 +213,8 @@ MuseScore {
                    text: "BACH AI"; font.bold: true; font.pixelSize: 12; font.letterSpacing: 1; color: cText }
             Row {
                 anchors { right: parent.right; rightMargin: 8; top: parent.top; topMargin: 4 } spacing: 4
-                Button { text: deviceToken === "" ? "Connect" : "Connected"; flat: true; font.pixelSize: 11
-                         enabled: !busy && deviceToken === ""; onClicked: beginPairing() }
+                Button { text: deviceToken === "" ? "Connect" : "Disconnect"; flat: true; font.pixelSize: 11
+                         enabled: !busy; onClicked: { if (deviceToken === "") beginPairing(); else disconnectDevice() } }
                 Button { text: "New chat"; flat: true; font.pixelSize: 11; enabled: !busy
                          onClicked: { chat.clear(); resetRequest(); bachConversationId = ""; sentCount = 0
                                       say("bot", "New Bach conversation. Tell me what to change in the open score.", "", "") } }
@@ -407,7 +429,7 @@ MuseScore {
         var stamp = Date.now()
         var wd = workDir !== "" ? workDir.replace(/\/+$/, "") + "/" : pluginDir()
         if (workDir !== "") { proc.startWithArgs("mkdir", ["-p", wd]); proc.waitForFinished(5000) }
-        src = wd + "in-" + stamp + ".musicxml"
+        var src = wd + "in-" + stamp + ".musicxml"
         var dst = wd + "out-" + stamp + ".musicxml"
         var rep = wd + "report-" + stamp + ".json"
         var done = wd + "done-" + stamp
