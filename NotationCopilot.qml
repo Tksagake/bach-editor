@@ -36,6 +36,13 @@ MuseScore {
     requiresScore: true
     width: 400; height: 760
 
+    // MuseScore exposes the directory containing this QML file as filePath.
+    // Keep one shared resolver for copilot.py, credentials and temporary job files.
+    function pluginDir() {
+        var p = String(filePath || "").replace(/[\\/]+$/, "")
+        return p === "" ? "" : p + "/"
+    }
+
     // ---- Nzumari connection ----
     property string mode: "local"
     // Nzumari production API.
@@ -189,12 +196,18 @@ MuseScore {
                 if (r.status === "authorized") {
                     stop(); pairingDeviceCode = ""; deviceToken = r.accessToken
                     fio.source = tokenPath()
-                    if (!fio.write(deviceToken)) {
+                    var saved = false
+                    try {
+                        saved = fio.write(deviceToken) && fio.exists() && String(fio.read()).trim() === deviceToken
+                    } catch (e) {
+                        console.log("Bach token persistence error: " + e)
+                    }
+                    if (!saved) {
                         deviceToken = ""
-                        say("error", "Could not save the device credential in the plugin folder.", "", "")
+                        say("error", "Nzumari approved this device, but MuseScore could not save and verify the token at: " + tokenPath(), "", "")
                         return
                     }
-                    say("bot", "Bach Editor is now connected to your Nzumari account.", "", "")
+                    say("bot", "Connected to Nzumari. This device credential has been saved for future MuseScore sessions.", "", "")
                 } else if (r.status === "expired" || r.status === "invalid" || r.status === "revoked") {
                     stop(); pairingDeviceCode = ""
                     say("error", "The pairing request expired or is no longer valid. Click Connect to try again.", "", "")
