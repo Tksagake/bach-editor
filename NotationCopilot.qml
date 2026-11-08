@@ -187,8 +187,7 @@ MuseScore {
             id: header; anchors { left: parent.left; right: parent.right; top: parent.top }
             height: 40; color: "#ffffff"
             Rectangle { anchors { left: parent.left; right: parent.right; bottom: parent.bottom } height: 1; color: cBorder }
-            Text { id: titleText; anchors { left: parent.left; leftMargin: 12; verticalCenter: planLine !== "" ? undefined : parent.verticalCenter
-                                                   top: planLine !== "" ? parent.top : undefined; topMargin: 10 }
+            Text { id: titleText; anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
                    text: "BACH AI"; font.bold: true; font.pixelSize: 12; font.letterSpacing: 1; color: cText }
             Row {
                 anchors { right: parent.right; rightMargin: 8; top: parent.top; topMargin: 4 } spacing: 4
@@ -348,15 +347,6 @@ MuseScore {
     }
 
     // ---------- conversation logic ----------
-    function updatePlan(a) {
-        var name = a.plan_name || ""
-        if (a.edits_left !== undefined && a.edits_left !== null && a.limit)
-            planLine = name + " \u00b7 " + a.edits_left + " of " + a.limit + " edits left"
-        else
-            planLine = name
-        manageUrl = (a.manage_url && /^https:\/\//.test(a.manage_url)) ? a.manage_url : ""
-    }
-
     function say(role, text, kind, opts, detail, url) {
         for (var i = 0; i < chat.count; i++) chat.setProperty(i, "live", false)
         chat.append({ role: role, text: text, kind: kind || "", opts: opts || "",
@@ -431,7 +421,7 @@ MuseScore {
                   + (force ? " --yes" : "") + " -o " + shq(dst) + " > " + shq(rep) + " 2>&1\n"
                   + "echo $? > " + shq(done) + "\n")
         console.log("copilot launcher: " + sh)
-        job = { rep: rep, dst: dst, done: done, hosted: false, target: target }
+        job = { rep: rep, dst: dst, done: done, target: target }
         busy = true; elapsed = 0
         proc.startWithArgs("sh", [sh])
         poll.start()
