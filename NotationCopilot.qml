@@ -50,6 +50,8 @@ MuseScore {
     property string deviceToken: ""                 // scoped Nzumari device token
     property string pairingDeviceCode: ""
     property bool pairingStarting: false
+    property bool pairingPollInFlight: false
+    property string pairingPollStatus: "Waiting for first check"
     property string bachConversationId: ""
     property string python: "python"
     property string copilot: pluginDir() + "copilot.py"
@@ -183,17 +185,29 @@ MuseScore {
         id: pairingPoll; interval: 3000; repeat: true
         onTriggered: {
             if (pairingDeviceCode === "") { stop(); return }
+            // Do not let a slow request overlap the next timer tick. The server
+            // consumes the device code when it issues the one-time access token.
+            if (pairingPollInFlight) return
+            pairingPollInFlight = true
+            var pollCode = pairingDeviceCode
+            pairingPollStatus = "Checking Nzumari…"
             var x = new XMLHttpRequest()
             x.onreadystatechange = function() {
                 if (x.readyState !== XMLHttpRequest.DONE) return
+                pairingPollInFlight = false
+                // Ignore late responses from a previous pairing attempt.
+                if (pairingDeviceCode !== pollCode) return
                 var r = null
                 try { r = JSON.parse(x.responseText) } catch (e) {}
+                console.log("Bach pairing poll: HTTP " + x.status + " · " + (r && r.status ? r.status : "no JSON status"))
                 if (x.status !== 200 || !r) {
                     stop(); pairingDeviceCode = ""
-                    say("error", (r && r.error) || "Could not complete Nzumari pairing.", "", "")
+                    pairingPollStatus = "Request failed (HTTP " + x.status + ")"
+                    say("error", (r && r.error) || ("Could not complete Nzumari pairing (HTTP " + x.status + ")."), "", "")
                     return
                 }
-                if (r.status === "authorized") {
+                pairingPollStatus = "Nzumari says: " + String(r.status || "unknown")
+                if (r.status === "authorized" && r.accessToken) {
                     stop(); pairingDeviceCode = ""; deviceToken = r.accessToken
                     fio.source = tokenPath()
                     var saved = false
@@ -204,18 +218,20 @@ MuseScore {
                     }
                     if (!saved) {
                         deviceToken = ""
+                        pairingPollStatus = "Approved, but token save failed"
                         say("error", "Nzumari approved this device, but MuseScore could not save and verify the token at: " + tokenPath(), "", "")
                         return
                     }
+                    pairingPollStatus = "Connected and token saved"
                     say("bot", "Connected to Nzumari. This device credential has been saved for future MuseScore sessions.", "", "")
-                } else if (r.status === "expired" || r.status === "invalid" || r.status === "revoked") {
+                } else if (r.status === "expired" || r.status === "invalid" || r.status === "revoked" || r.status === "consumed") {
                     stop(); pairingDeviceCode = ""
-                    say("error", "The pairing request expired or is no longer valid. Click Connect to try again.", "", "")
+                    say("error", "The pairing request is no longer valid (" + r.status + "). Click Connect to try again.", "", "")
                 }
             }
             x.open("POST", serverUrl + "/api/bach/editor/device")
             x.setRequestHeader("Content-Type", "application/json")
-            x.send(JSON.stringify({ action: "token", deviceCode: pairingDeviceCode }))
+            x.send(JSON.stringify({ action: "token", deviceCode: pollCode }))
         }
     }
 
@@ -254,7 +270,7 @@ MuseScore {
                 Text { text: pairingDeviceCode !== "" ? "WAITING FOR APPROVAL" : (pairingStarting ? "CONNECTING TO NZUMARI…" : "BACH IS NOT CONNECTED")
                        font.pixelSize: 11; font.bold: true; color: cText }
                 Text { width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 11; color: cMuted
-                       text: pairingDeviceCode !== "" ? "Approve the pairing request in your browser. Code: " + pairingDeviceCode
+                       text: pairingDeviceCode !== "" ? "Approve the pairing request in your browser. Code: " + pairingDeviceCode + "\\n" + pairingPollStatus
                              : "Connect this MuseScore installation to your Nzumari account to use Bach AI." }
                 Button { text: pairingStarting ? "Connecting…" : (pairingDeviceCode !== "" ? "Request pending…" : "Connect to Nzumari")
                          highlighted: true; enabled: !pairingStarting && pairingDeviceCode === ""
