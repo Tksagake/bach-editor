@@ -117,71 +117,73 @@ MuseScore {
 
     onRun: {
         lastScoreName = curScore ? String(curScore.scoreName) : ""
-        if (mode === "hosted" && apiKey === "") loadKey()
-        sayHello()
-        if (mode === "hosted" && apiKey === "") askForKey()
-        else say("bot", "Hi! Ask me for anything in the open score, in your own words, e.g. \"write a simple 4-bar melody in bars 1-4\", "
-            + "\"repeat bars 1-4 in bars 5-8\", \"add chord symbols Am G Am E7 to bars 1-4\" or "
-            + "\"voice the alto 1 melody in bars 9-16 for the saxes\". I only touch what you ask for.", "", "")
+        loadDeviceToken()
+        if (apiKey === "")
+            say("bot", "Welcome to Bach Editor. Click Connect to pair this installation with your Nzumari account.", "", "")
+        else
+            say("bot", "Connected to Nzumari Bach. Ask me to change the open score in plain language. Your edits remain local to MuseScore and one Ctrl+Z undoes each request.", "", "")
         placeTimer.start()
     }
 
-    // One "plugin opened" ping per window open (and once more when a key is pasted): plugin version +
-    // MuseScore version, with the key in the Authorization header (never in the URL) so the server can
-    // count opens per account. No score content. Fire and forget: the reply and any error are ignored.
-    function msVersion() {
-        try {
-            if (typeof mscoreMajorVersion !== "undefined")
-                return mscoreMajorVersion + "." + mscoreMinorVersion + "." + mscoreUpdateVersion
-        } catch (e) { }
-        return ""
+    // ---------- Nzumari device credential ----------
+    // Device tokens are scoped to Bach Editor and can be revoked from Nzumari.
+    function tokenPath() { return pluginDir() + "bach-editor-token.txt" }
+    function loadDeviceToken() {
+        fio.source = tokenPath()
+        if (fio.exists()) apiKey = String(fio.read()).trim()
     }
-    function sayHello() {
-        if (mode !== "hosted") return
-        try {
-            var x = new XMLHttpRequest()
-            x.open("POST", serverUrl.replace(/\/+$/, "") + "/v1/hello")
-            x.setRequestHeader("Content-Type", "application/json")
-            if (apiKey) x.setRequestHeader("Authorization", "Bearer " + apiKey)
-            x.send(JSON.stringify({ v: root.version, ms: msVersion() }))
-        } catch (e) { }
-    }
-
-    // ---------- AiHud key (hosted mode) ----------
-    // Either set apiKey above, or paste the key into the chat once; it is saved to copilot-key.txt.
-    // Saved next to this .qml: MuseScore 4.7 blocks plugin writes outside its allowed dirs (e.g. ~).
-    // file:// URL -> local path on any OS: file:///C:/Users/x/Dokumente/a%20b.qml -> C:/Users/x/Dokumente/a b.qml,
-    // file:///home/x/a.qml -> /home/x/a.qml, file://server/share/a -> //server/share/a (Windows network folder).
-    function urlToPath(u) {
-        var s = String(u)
-        if (/^file:\/\/\//i.test(s)) s = s.substring(7)          // "/C:/..." or "/home/..."
-        else if (/^file:\/\//i.test(s)) s = "//" + s.substring(7) // UNC
-        else if (/^file:/i.test(s)) s = s.substring(5)
-        try { s = decodeURIComponent(s) } catch (e) { }
-        if (/^\/[A-Za-z]:/.test(s)) s = s.substring(1)              // Windows drive letter
-        return s
-    }
-    // This plugin's folder (Documents/MuseScore4/Plugins/NotationCopilot), with a trailing "/".
-    function pluginDir() { var d = urlToPath(Qt.resolvedUrl(".")); return /\/$/.test(d) ? d : d + "/" }
-    // Where the hosted-mode export goes: the plugin folder; if that is not writable (probe with FileIO,
-    // which fails silently -- writeScore would pop MuseScore's "retry?" dialog), the system temp folder.
-    function exportPath() {
-        var cands = [pluginDir()]
-        try { var t = String(fio.tempPath() || "").replace(/\\/g, "/"); if (t !== "") cands.push(/\/$/.test(t) ? t : t + "/") } catch (e) { }
-        for (var i = 0; i < cands.length; i++) {
-            fio.source = cands[i] + "copilot-export.musicxml"
-            if (fio.write("")) return fio.source
+    function beginPairing() {
+        if (pairingDeviceCode !== "") return
+        var x = new XMLHttpRequest()
+        x.onreadystatechange = function() {
+            if (x.readyState !== XMLHttpRequest.DONE) return
+            var r = null
+            try { r = JSON.parse(x.responseText) } catch (e) {}
+            if (x.status !== 200 || !r || !r.deviceCode) {
+                say("error", (r && r.error) || "Could not start Nzumari pairing.", "", "")
+                return
+            }
+            pairingDeviceCode = r.deviceCode
+            say("bot", "Approve this MuseScore installation in your browser. Pairing code: " + r.userCode, "", "")
+            Qt.openUrlExternally(r.verificationUri)
+            pairingPoll.start()
         }
-        return cands[0] + "copilot-export.musicxml"
+        x.open("POST", serverUrl + "/api/bach/editor/device")
+        x.setRequestHeader("Content-Type", "application/json")
+        x.send(JSON.stringify({ action: "authorize", deviceName: "Bach Editor · MuseScore" }))
     }
-    function keyPath() { return pluginDir() + "copilot-key.txt" }
-    function loadKey() {
-        fio.source = keyPath()
-        if (fio.exists()) { var k = String(fio.read()).trim(); if (/^nc_live_[A-Za-z0-9_-]{8,}$/.test(k)) apiKey = k }
-    }
-    function askForKey() {
-        say("bot", "Welcome to Bach AI! To start, paste your Dahl API key (set it in your env file) "
-            + "here and press Enter.\n\nNo key yet? Get a free one (100-edit trial, then 10 a month) at " + serverUrl, "", "")
+    Timer {
+        id: pairingPoll; interval: 3000; repeat: true
+        onTriggered: {
+            if (pairingDeviceCode === "") { stop(); return }
+            var x = new XMLHttpRequest()
+            x.onreadystatechange = function() {
+                if (x.readyState !== XMLHttpRequest.DONE) return
+                var r = null
+                try { r = JSON.parse(x.responseText) } catch (e) {}
+                if (x.status !== 200 || !r) {
+                    stop(); pairingDeviceCode = ""
+                    say("error", (r && r.error) || "Could not complete Nzumari pairing.", "", "")
+                    return
+                }
+                if (r.status === "authorized") {
+                    stop(); pairingDeviceCode = ""; apiKey = r.accessToken
+                    fio.source = tokenPath()
+                    if (!fio.write(apiKey)) {
+                        apiKey = ""
+                        say("error", "Could not save the device credential in the plugin folder.", "", "")
+                        return
+                    }
+                    say("bot", "Bach Editor is now connected to your Nzumari account.", "", "")
+                } else if (r.status === "expired" || r.status === "invalid" || r.status === "revoked") {
+                    stop(); pairingDeviceCode = ""
+                    say("error", "The pairing request expired or is no longer valid. Click Connect to try again.", "", "")
+                }
+            }
+            x.open("POST", serverUrl + "/api/bach/editor/device")
+            x.setRequestHeader("Content-Type", "application/json")
+            x.send(JSON.stringify({ action: "token", deviceCode: pairingDeviceCode }))
+        }
     }
 
     // ---------- UI ----------
