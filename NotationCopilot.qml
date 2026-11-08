@@ -452,26 +452,50 @@ MuseScore {
         if (!curScore) { say("error", "Open a score first.", "", ""); return }
         var target = curScore.scoreName
         if (deviceToken === "") { beginPairing(); return }
-        // Export the active score; the local parser creates the compact notation snapshot for Bach.
+        // Export the active score; report every failure visibly instead of leaving a stranded user bubble.
         var stamp = Date.now()
         var wd = workDir !== "" ? workDir.replace(/\/+$/, "") + "/" : pluginDir()
-        if (workDir !== "") { proc.startWithArgs("mkdir", ["-p", wd]); proc.waitForFinished(5000) }
         var src = wd + "in-" + stamp + ".musicxml"
         var dst = wd + "out-" + stamp + ".musicxml"
         var rep = wd + "report-" + stamp + ".json"
         var done = wd + "done-" + stamp
-        if (!writeScore(curScore, src, "musicxml")) {
-            say("error", "Could not export the score to " + src + ".", "", ""); return
+        busy = true; elapsed = 0
+        say("status", "Preparing the score for Bach…", "", "")
+        var exported = false
+        try {
+            exported = writeScore(curScore, src, "musicxml")
+        } catch (e) {
+            busy = false
+            console.log("Bach score export exception: " + e)
+            say("error", "MuseScore could not export this score. " + String(e), "", "")
+            return
+        }
+        if (!exported) {
+            busy = false
+            console.log("Bach score export returned false: " + src)
+            say("error", "MuseScore's MusicXML export failed. No AI request was sent.", "", "")
+            return
+        }
+        fio.source = src
+        if (!fio.exists()) {
+            busy = false
+            say("error", "MuseScore reported a successful export, but the MusicXML file was not created: " + src, "", "")
+            return
         }
         var sh = wd + "run-" + stamp + ".sh"
         fio.source = sh
-        fio.write(shq(python) + " " + shq(copilot) + " " + shq(src) + " " + shq(instruction)
-                  + historyArgs() + (bachConversationId !== "" ? " --conversation-id " + shq(bachConversationId) : "")
-                  + (force ? " --yes" : "") + " -o " + shq(dst) + " > " + shq(rep) + " 2>&1\n"
-                  + "echo $? > " + shq(done) + "\n")
+        try {
+            fio.write(shq(python) + " " + shq(copilot) + " " + shq(src) + " " + shq(instruction)
+                      + historyArgs() + (bachConversationId !== "" ? " --conversation-id " + shq(bachConversationId) : "")
+                      + (force ? " --yes" : "") + " -o " + shq(dst) + " > " + shq(rep) + " 2>&1\n"
+                      + "echo $? > " + shq(done) + "\n")
+        } catch (e) {
+            busy = false
+            say("error", "Could not create Bach's local launcher script: " + String(e), "", "")
+            return
+        }
         console.log("copilot launcher: " + sh)
         job = { rep: rep, dst: dst, done: done, target: target }
-        busy = true; elapsed = 0
         proc.startWithArgs("sh", [sh])
         poll.start()
     }
