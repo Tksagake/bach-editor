@@ -571,14 +571,14 @@ MuseScore {
             say("error", "Something went wrong (exit " + rc + ").", "", "", txt.slice(-1500))
             resetRequest(); return
         }
-        if (rep.status === "applied") finishApplied(rep, rep.edits || [], rep.edit_notes || [], "", rep.edit_summary)
+        if (rep.status === "applied") finishApplied(rep, rep.edits || [], rep.edit_notes || [], rep.edit_summary)
         else say("bot", rep.message || head || "Nothing to change.", "", "", logText(rep))
         resetRequest()
     }
 
     function logText(rep) { return (rep.log || []).map(function(l) { return "- " + l }).join("\n") }
 
-    function finishApplied(rep, edits, notes, cost, summary) {
+    function finishApplied(rep, edits, notes, summary) {
         if (!curScore || curScore.scoreName !== job.target) {
             say("error", "The score \"" + job.target + "\" is no longer the active score, so nothing was changed. "
                 + "Switch back to it and ask again.", "", ""); return
@@ -596,7 +596,7 @@ MuseScore {
         var msg = "Changed " + (where.length ? where.join("; ") : (rep.message || "the score"))
         var extra = notes.concat(res.problems)
         say("bot", msg + " — Ctrl+Z to undo." + (extra.length ? "\nNote: " + extra.join("; ") + "." : ""),
-            "", "", logText(rep) + cost)
+            "", "", logText(rep))
     }
 
     // ---------- in-place edits (see edits.py for the op format) ----------
