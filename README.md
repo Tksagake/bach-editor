@@ -1,58 +1,44 @@
-# Notation Copilot for MuseScore 4
+# Bach Editor
 
-**Notation Copilot** is a MuseScore Studio 4 plugin by [AiHud](https://aihud.net) that does arranging jobs you describe in plain English, in place, in the score you have open. One Ctrl+Z undoes the whole request.
+Bach Editor is a notation-editor integration for Nzumari Bach AI. The initial integration targets MuseScore 4 and preserves the original score-editing engine from the AiHud Notation Copilot project.
 
-- **Section voicing**: "voice the alto 1 melody in bars 9-16 for the saxes, drop 2". Melody on top, close or drop-2 voicings under it from your chord symbols (or the harmony in the other parts), one line per part, every note in range.
-- **Pads and backgrounds**: "write a sustained string pad under bars 17-24", "brass hits on 2 and 4 in bars 25-28". Chord tones with smooth voice leading.
-- **Easier parts**: "make an easier version of the trumpet 1 part in bars 33-40 for beginners". Fewer fast notes, smaller range, same shape.
-- **Bass lines**: "add a walking bass line in the contrabass, bars 1-16".
-- Small edits too: doubling, transposing, slurs and articulations.
+## Current architecture
 
-The editing is powered by the hosted **AiHud Notation Copilot** service at https://copilot.aihud.net, where you can get a free key.
+- MuseScore exports the active score to MusicXML locally.
+- The bundled Python helper parses the score and builds a compact notation snapshot.
+- Bach Editor authenticates to Nzumari using a device-pairing flow.
+- The snapshot and editing instruction are sent to Nzumari's Bach Editor API over HTTPS.
+- Nzumari assembles the same composer profile, confirmed memories, conversation history and authorised work context used by Bach.
+- Bach returns a structured edit report; the plugin validates and applies the operations locally in MuseScore.
+- Score edits remain local to MuseScore. The API receives the compact score snapshot needed for the requested edit, not the original MusicXML file.
 
-Demo video: https://copilot.aihud.net/demo.mp4
+## Install (MuseScore 4)
 
-## Install (MuseScore Studio 4.x)
+1. Copy the plugin folder into your MuseScore 4 plugins directory.
+2. Update the `copilot` property in `NotationCopilot.qml` if your Python helper is installed elsewhere.
+3. Ensure Python 3 is installed and available as `python` in your PATH.
+4. Enable Bach Editor in MuseScore's Plugin Manager and restart MuseScore.
+5. Open a score and run **Plugins → Composing/arranging tools → Bach Editor**.
+6. Select **Connect**. A browser window opens to Nzumari.
+7. Sign in to Nzumari, review the pairing code and approve the MuseScore installation.
+8. Return to MuseScore. Bach Editor will confirm when pairing is complete.
 
-1. Copy the `NotationCopilot` folder from this zip into your MuseScore plugins folder:
-   - Windows: `Documents\MuseScore4\Plugins\`
-   - macOS / Linux: `~/Documents/MuseScore4/Plugins/`
-2. Restart MuseScore.
-3. Go to **Home > Plugins**, find **Notation Copilot**, and click **Enable**.
-4. Open a score and run **Plugins > Composing/arranging tools > Notation Copilot**.
+No Dahl, MiniMax, DeepSeek or other AI-provider API key is required on the local machine. Provider credentials remain on the Nzumari server.
 
-## Get a free key
+## Authentication
 
-If you downloaded this zip right after signing up on copilot.aihud.net, your key is already inside (`NotationCopilot/copilot-key.txt`) and you can skip this section.
+The plugin uses a scoped Nzumari device credential rather than a copied browser session or provider API key. Pairing codes expire after 10 minutes. Device credentials currently expire after 90 days and can be revoked server-side. If a credential is lost or expires, pair the plugin again.
 
-1. Sign up at https://copilot.aihud.net
-2. Copy your key (it starts with `nc_live_`).
-3. The first time you open the plugin it asks for the key; paste it into the chat. It is saved next to the plugin in `copilot-key.txt`, so you only do this once.
+The current MuseScore plugin stores its device credential in `bach-editor-token.txt` beside the plugin. The file is excluded by `.gitignore`; do not commit or share it. Protect access to your Windows user account and plugin directory. OS credential-store integration is a follow-up hardening task.
 
-If a request is ambiguous (which bars? which part has the melody?), or the target bars already have music (replace it, or add a second voice?), the copilot asks with clickable options instead of guessing.
+## Data handling
 
-Free plan: a free trial of 100 applied edits, then 10 free edits every month (resets on the 1st, UTC). Your key works right away for the first few edits; after that, click the activation link in the signup email (check spam) to keep using the free plan.
+The score snapshot, editing instruction and Bach response are sent to Nzumari over HTTPS. The editing request is stored in the user's Bach conversation so the same Bach history and context can be used across Nzumari and the notation editor. The plugin does not upload the original MusicXML file as a persistent asset. Existing Nzumari personalisation settings govern the context Bach may use.
 
-Monthly plans: Pro is $19 a month for 200 applied edits; Composer is $99 a month for 1,000 applied edits (fair use). Questions and replies that change nothing never count. Edits reset on the 1st of each month (UTC).
+## Editing behaviour
 
-Credit packs (AiHud credits, 1 credit = $0.001): a typical edit uses about 150 to 450 credits, depending on how much music you ask for; big full-band requests can use 750. Clarifying questions are billed like a request; requests that change nothing are not charged. $10 (10,000 credits) is roughly 25 to 65 edits.
+The existing MuseScore editing engine is retained. It supports note/rest entry, pitch changes, articulations, slurs, dynamics, hairpins, chord symbols, key signatures, lyrics, text and layout operations. Each request is applied as a single MuseScore command so one undo reverses the request. The plugin performs local structural checks and rolls back failed operations.
 
-Plans and packs: https://copilot.aihud.net/buy
+## Original work and licence
 
-## What it can't do (yet)
-
-- Dock as a real panel in MuseScore 4.7.x (the window positions itself as a sidebar instead)
-- Edit dynamics, lyrics, chord symbols, layout or playback settings
-- Write idiomatic counter-melodies or full orchestrations from scratch (it voices, pads, simplifies and writes bass lines from the harmony that is there)
-- Guarantee musically perfect results. Always review the change; Ctrl+Z undoes it in one step.
-- Work offline: it needs an internet connection to the AiHud service.
-
-## Privacy
-
-To compute an edit, the plugin exports your **open score as MusicXML** and sends it, with your request, to AiHud's server (`https://copilot.aihud.net`) over HTTPS. The edit list comes back and the plugin applies it locally. Nothing is sent until you submit a request. Your score is sent to AiHud only to make the edit and is not stored. We keep the text of your requests and our replies to improve the service, and look up the approximate location of visitor IP addresses.
-
-## License
-
-GPL-3.0, Copyright (C) 2026 AiHud. See `LICENSE`. The hosted service is operated by AiHud and is not part of this package.
-
-Made by [AiHud](https://aihud.net). Questions: hi@aihud.net
+This repository is derived from AiHud's Notation Copilot for MuseScore 4. The original copyright and GPL-3.0 notices are retained in `LICENSE` and the source. Modifications for Nzumari Bach Editor are made under the terms of GPL-3.0-or-later. The AiHud hosted service is not part of this project.
