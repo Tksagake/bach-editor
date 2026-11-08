@@ -1,4 +1,4 @@
-// Notation Copilot -- MuseScore 4 plugin, chat-sidebar edition.
+// Bach Editor -- MuseScore 4 notation integration.
 // Author: AiHud (https://copilot.aihud.net, hi@aihud.net)
 // Copyright (C) 2026 AiHud. Licensed under the GNU GPL v3 or later:
 // https://copilot.aihud.net/LICENSE  Source: https://copilot.aihud.net/source
@@ -12,9 +12,8 @@
 // as a full-height sidebar flush with the right edge of the MuseScore window and
 // stays open across requests (it is non-modal).
 //
-// Flow per message: export the OPEN score to MusicXML -> hosted mode: POST it to
-// <serverUrl>/v1/edit with the AiHud key (XMLHttpRequest); local mode: run copilot.py via a
-// launcher script (QProcess.startWithArgs, non-blocking, polled) -> show reply / clarifying
+// Flow per message: export the OPEN score to MusicXML -> local parser creates a compact
+// score snapshot -> authenticated Nzumari Bach Editor API -> apply validated edits in place.
 // question with option buttons -> apply the returned edit list IN PLACE to the open score
 // inside one startCmd()/endCmd(), so a single Ctrl+Z undoes the whole request. Every request
 // re-exports the score, so follow-ups build on it, including any manual edits.
@@ -40,7 +39,7 @@ MuseScore {
     // ---- Nzumari connection ----
     property string mode: "local"
     property string serverUrl: "https://nzumari.vivaceke.co.ke"
-    property string apiKey: ""                 // scoped Nzumari device token
+    property string deviceToken: ""                 // scoped Nzumari device token
     property string pairingDeviceCode: ""
     property string bachConversationId: ""
     property string python: "python"
@@ -63,13 +62,7 @@ MuseScore {
                                      "Transpose the flute part up a major second in bars 1-8",
                                      "Add chord symbols to the melody in bars 1-8",
                                      "Double the melody in the strings in bars 1-8"]
-    readonly property bool showExamples: sentCount === 0 && !busy && !needActivation && apiKey !== ""
-    // 402 error=activate: show the "enter your 6-digit code / resend the email" box above the input.
-    property bool needActivation: false
-    property bool actBusy: false
-    property string planLine: ""         // 0.8.1: "Pro · 143 edits left" from the server's `account` block
-    property string manageUrl: ""        // signed account page (plan, usage, cancel)
-    property string lastBlocked: ""      // request that hit the 402; put back in the box after activation
+    readonly property bool showExamples: sentCount === 0 && !busy && deviceToken !== ""
 
     readonly property color cBg: "#f7f8fa"
     readonly property color cUser: "#0b6bcb"
@@ -118,7 +111,7 @@ MuseScore {
     onRun: {
         lastScoreName = curScore ? String(curScore.scoreName) : ""
         loadDeviceToken()
-        if (apiKey === "")
+        if (deviceToken === "")
             say("bot", "Welcome to Bach Editor. Click Connect to pair this installation with your Nzumari account.", "", "")
         else
             say("bot", "Connected to Nzumari Bach. Ask me to change the open score in plain language. Your edits remain local to MuseScore and one Ctrl+Z undoes each request.", "", "")
@@ -130,7 +123,7 @@ MuseScore {
     function tokenPath() { return pluginDir() + "bach-editor-token.txt" }
     function loadDeviceToken() {
         fio.source = tokenPath()
-        if (fio.exists()) apiKey = String(fio.read()).trim()
+        if (fio.exists()) deviceToken = String(fio.read()).trim()
     }
     function beginPairing() {
         if (pairingDeviceCode !== "") return
@@ -167,10 +160,10 @@ MuseScore {
                     return
                 }
                 if (r.status === "authorized") {
-                    stop(); pairingDeviceCode = ""; apiKey = r.accessToken
+                    stop(); pairingDeviceCode = ""; deviceToken = r.accessToken
                     fio.source = tokenPath()
-                    if (!fio.write(apiKey)) {
-                        apiKey = ""
+                    if (!fio.write(deviceToken)) {
+                        deviceToken = ""
                         say("error", "Could not save the device credential in the plugin folder.", "", "")
                         return
                     }
@@ -192,23 +185,15 @@ MuseScore {
 
         Rectangle {   // header
             id: header; anchors { left: parent.left; right: parent.right; top: parent.top }
-            height: planLine !== "" ? 54 : 40; color: "#ffffff"
+            height: 40; color: "#ffffff"
             Rectangle { anchors { left: parent.left; right: parent.right; bottom: parent.bottom } height: 1; color: cBorder }
             Text { id: titleText; anchors { left: parent.left; leftMargin: 12; verticalCenter: planLine !== "" ? undefined : parent.verticalCenter
                                                    top: planLine !== "" ? parent.top : undefined; topMargin: 10 }
                    text: "BACH AI"; font.bold: true; font.pixelSize: 12; font.letterSpacing: 1; color: cText }
-            Text {   // plan + edits left (server `account` block); click = account page
-                id: planText; visible: planLine !== ""; text: planLine; font.pixelSize: 11; color: cMuted
-                font.underline: manageUrl !== "" && planMouse.containsMouse
-                anchors { left: parent.left; leftMargin: 12; top: titleText.bottom; topMargin: 3 }
-                MouseArea { id: planMouse; anchors.fill: parent; hoverEnabled: true
-                            cursorShape: manageUrl !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
-                            onClicked: if (manageUrl !== "") Qt.openUrlExternally(manageUrl) }
-            }
             Row {
                 anchors { right: parent.right; rightMargin: 8; top: parent.top; topMargin: 4 } spacing: 4
-                Button { text: apiKey === "" ? "Connect" : "Connected"; flat: true; font.pixelSize: 11
-                         enabled: !busy && apiKey === ""; onClicked: beginPairing() }
+                Button { text: deviceToken === "" ? "Connect" : "Connected"; flat: true; font.pixelSize: 11
+                         enabled: !busy && deviceToken === ""; onClicked: beginPairing() }
                 Button { text: "New chat"; flat: true; font.pixelSize: 11; enabled: !busy
                          onClicked: { chat.clear(); resetRequest(); bachConversationId = ""; sentCount = 0
                                       say("bot", "New Bach conversation. Tell me what to change in the open score.", "", "") } }
@@ -219,7 +204,7 @@ MuseScore {
         ListView {
             id: list
             anchors { left: parent.left; right: parent.right; top: header.bottom
-                      bottom: showExamples ? examplesBox.top : (needActivation ? actBox.top : composer.top); margins: 10 }
+                      bottom: showExamples ? examplesBox.top : composer.top; margins: 10 }
             clip: true; spacing: 10; model: chat
             ScrollBar.vertical: ScrollBar {}
             onCountChanged: Qt.callLater(function() { list.positionViewAtEnd() })
@@ -318,30 +303,6 @@ MuseScore {
             }
         }
 
-        Rectangle {   // activation: 6-digit code from the email, or resend the email (402 error=activate)
-            id: actBox
-            visible: needActivation
-            anchors { left: parent.left; right: parent.right; bottom: composer.top
-                      leftMargin: 10; rightMargin: 10; bottomMargin: 8 }
-            height: actCol.height + 16; radius: 8; color: "#fffbeb"; border.color: "#fde68a"
-            Column {
-                id: actCol; x: 8; y: 8; width: parent.width - 16; spacing: 6
-                Text { width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 12; font.bold: true; color: cText
-                       text: "Activate your free edits: type the 6-digit code from the email we sent you." }
-                Row {
-                    spacing: 6
-                    TextField {
-                        id: codeInput; width: 120; placeholderText: "123456"; enabled: !actBusy
-                        maximumLength: 7; inputMethodHints: Qt.ImhDigitsOnly; font.pixelSize: 15
-                        onAccepted: submitCode()
-                    }
-                    Button { text: "Activate"; highlighted: true; onClicked: submitCode()
-                             enabled: !actBusy && codeInput.text.replace(/\D/g, "").length === 6 }
-                }
-                Button { text: "Resend activation email"; flat: true; enabled: !actBusy; onClicked: resendActivation() }
-            }
-        }
-
         Rectangle {   // composer
             id: composer
             anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: 10 }
@@ -422,7 +383,7 @@ MuseScore {
         if (t === "" || busy) return
         input.text = ""
         say("user", t, "", "")
-        if (apiKey === "") { beginPairing(); return }
+        if (deviceToken === "") { beginPairing(); return }
         sentCount++
         if (pendingKind === "clarify") {
             addAnswer(t)
@@ -451,7 +412,7 @@ MuseScore {
     function runCopilot(force) {
         if (!curScore) { say("error", "Open a score first.", "", ""); return }
         var target = curScore.scoreName
-        if (apiKey === "") { beginPairing(); return }
+        if (deviceToken === "") { beginPairing(); return }
         // Export the active score; the local parser creates the compact notation snapshot for Bach.
         var stamp = Date.now()
         var wd = workDir !== "" ? workDir.replace(/\/+$/, "") + "/" : pluginDir()
@@ -476,55 +437,10 @@ MuseScore {
         poll.start()
     }
 
-    // ---------- activation (hosted mode) ----------
-    function actPost(path, body, done) {
-        actBusy = true
-        var x = new XMLHttpRequest()
-        x.onreadystatechange = function() {
-            if (x.readyState !== XMLHttpRequest.DONE) return
-            actBusy = false
-            var r = null
-            try { r = JSON.parse(x.responseText) } catch (e) { r = null }
-            done(x.status, r || {})
-        }
-        x.open("POST", serverUrl.replace(/\/+$/, "") + path)
-        x.setRequestHeader("Content-Type", "application/json")
-        x.send(JSON.stringify(body))
-    }
-    function submitCode() {
-        var c = codeInput.text.replace(/\D/g, "")
-        if (c.length !== 6 || actBusy) return
-        actPost("/v1/activate", { key: apiKey, code: c }, function(st, r) {
-            if (st === 0) { say("error", "Could not reach the Copilot service at " + serverUrl + ".", "", ""); return }
-            if (r.ok) {
-                needActivation = false; codeInput.text = ""
-                say("bot", r.message || "Activated.", "", "")
-                if (lastBlocked !== "" && input.text === "") { input.text = lastBlocked; input.forceActiveFocus() }
-                lastBlocked = ""
-            } else say("error", r.message || ("Activation failed (HTTP " + st + ")."), "", "")
-        })
-    }
-    function resendActivation() {
-        if (actBusy) return
-        actPost("/v1/resend-activation", { key: apiKey }, function(st, r) {
-            if (st === 0) { say("error", "Could not reach the Copilot service at " + serverUrl + ".", "", ""); return }
-            if (r.result === "already") needActivation = false
-            say(r.ok ? "bot" : "error", r.message || ("Could not resend (HTTP " + st + ")."), "", "")
-        })
-    }
-
     Timer {
         id: poll; interval: 1000; repeat: true
         onTriggered: {
             elapsed++
-            if (job.hosted) {
-                if (elapsed > requestTimeoutSec && job.xhr) {
-                    var x = job.xhr; job.xhr = null; x.abort(); stop(); busy = false
-                    say("error", "The Copilot service did not answer within " + requestTimeoutSec + "s.", "", "")
-                    resetRequest()
-                }
-                return
-            }
             fio.source = job.done
             if (!fio.exists()) {
                 if (elapsed > 300) { stop(); busy = false; say("error", "Copilot timed out.", "", "") }
@@ -535,64 +451,6 @@ MuseScore {
             fio.source = job.rep
             handleReport(fio.read(), rc)
         }
-    }
-
-    // ---------- hosted mode ----------
-    function postHosted(src, dst, force, target) {
-        if (apiKey === "") { askForKey(); return }
-        fio.source = src
-        var xml = fio.read()
-        try { fio.remove() } catch (e) { }                  // don't leave score copies lying around
-        if (!xml || xml.length < 50) { say("error", "Could not read the exported score.", "", ""); return }
-        xml = String(xml).replace(/>\n[ \t]*</g, "><")     // drop indentation: ~30% smaller upload
-        var xhr = new XMLHttpRequest()
-        job = { dst: dst, hosted: true, xhr: xhr, target: target }
-        busy = true; elapsed = 0; poll.start()
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState !== XMLHttpRequest.DONE || job.xhr !== xhr) return
-            job.xhr = null; poll.stop(); busy = false
-            handleHosted(xhr.status, xhr.responseText)
-        }
-        xhr.open("POST", serverUrl.replace(/\/+$/, "") + "/v1/edit")
-        xhr.setRequestHeader("Content-Type", "application/json")
-        xhr.setRequestHeader("Authorization", "Bearer " + apiKey)
-        xhr.send(JSON.stringify({ musicxml: xml, instruction: instruction, history: history, yes: !!force,
-                                  inplace: true, plugin: root.version }))
-        console.log("copilot hosted request -> " + serverUrl + " (" + xml.length + " bytes)")
-    }
-
-    function handleHosted(httpStatus, txt) {
-        var r = null
-        try { r = JSON.parse(txt) } catch (e) { r = null }
-        if (!r) {
-            say("error", httpStatus === 0 ? "Could not reach the Copilot service at " + serverUrl + "."
-                       : httpStatus === 413 ? "This score is too large for the Copilot service."
-                                            : "Unexpected reply from the Copilot service (HTTP " + httpStatus + ").",
-                "", "", String(txt || "").slice(0, 800))
-            resetRequest(); return
-        }
-        var rep = r.report || {}
-        if (r.account) updatePlan(r.account)
-        var cost = r.usage ? "\n(" + (r.usage.latency_ms / 1000).toFixed(1) + "s, " + r.usage.credits + " credits)" : ""
-        if (r.status === "question") {
-            pendingKind = r.kind || "clarify"; pendingQuestion = r.question
-            if (pendingKind === "confirm")
-                say("bot", r.question, "confirm", "", (r.options || []).join("\n"))
-            else
-                say("bot", r.question, "clarify", (r.options || []).join("\n"))
-            return
-        }
-        if (r.status === "error") {
-            if (r.error === "activate") {
-                needActivation = true
-                if (!r.no_email_help) lastBlocked = instruction
-            }
-            say("error", rep.message || ("Error (HTTP " + httpStatus + ")."), "", "", "", rep.buy_url || "")
-            resetRequest(); return
-        }
-        if (r.status === "applied") finishApplied(rep, r.edits || [], r.edit_notes || [], cost, r.edit_summary, r.buy_url || "")
-        else say("bot", rep.message || "Nothing to change.", "", "", logText(rep) + cost)
-        resetRequest()
     }
 
     function handleReport(txt, rc) {
