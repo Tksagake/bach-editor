@@ -19,6 +19,7 @@ from urllib.error import HTTPError, URLError
 
 TPQ = 480  # MuseScore internal ticks per quarter note (hardcoded in QML applyEdits)
 
+# PREVIEW TEST ONLY — switch to production before merging this branch.
 NZUMARI_BASE_URL = "https://nzumari.vivaceke.co.ke"
 
 # ---------------------------------------------------------------------------

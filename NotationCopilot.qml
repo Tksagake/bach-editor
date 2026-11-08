@@ -28,7 +28,7 @@ import FileIO 3.0
 
 MuseScore {
     id: root
-    version: "0.8.3"
+    version: "0.9.1"
     title: "Bach AI"
     description: "Ask in plain language (any language) and the AI edits the open score: write melodies, scales, exercises and countermelodies, copy or clear bars, add dynamics and chord symbols, voice sections, write pads and bass lines. One Ctrl+Z undoes each request."
     categoryCode: "composing-arranging-tools"
@@ -36,11 +36,20 @@ MuseScore {
     requiresScore: true
     width: 400; height: 760
 
+    // MuseScore exposes the directory containing this QML file as filePath.
+    // Keep one shared resolver for copilot.py, credentials and temporary job files.
+    function pluginDir() {
+        var p = String(filePath || "").replace(/[\\/]+$/, "")
+        return p === "" ? "" : p + "/"
+    }
+
     // ---- Nzumari connection ----
     property string mode: "local"
+    // Nzumari production API.
     property string serverUrl: "https://nzumari.vivaceke.co.ke"
     property string deviceToken: ""                 // scoped Nzumari device token
     property string pairingDeviceCode: ""
+    property bool pairingStarting: false
     property string bachConversationId: ""
     property string python: "python"
     property string copilot: pluginDir() + "copilot.py"
@@ -64,14 +73,14 @@ MuseScore {
                                      "Double the melody in the strings in bars 1-8"]
     readonly property bool showExamples: sentCount === 0 && !busy && deviceToken !== ""
 
-    readonly property color cBg: "#f7f8fa"
-    readonly property color cUser: "#0b6bcb"
-    readonly property color cBot: "#ffffff"
-    readonly property color cBorder: "#d9dde3"
-    readonly property color cText: "#1f2328"
-    readonly property color cMuted: "#656d76"
-    readonly property color cBorderLight: "#e9ecf0"
-    readonly property color cInputBg: "#fafbfc"
+    readonly property color cBg: "#F7F5EF"
+    readonly property color cUser: "#173B30"
+    readonly property color cBot: "#FFFFFF"
+    readonly property color cBorder: "#DED8CB"
+    readonly property color cText: "#293B32"
+    readonly property color cMuted: "#7A887F"
+    readonly property color cBorderLight: "#E6E8E2"
+    readonly property color cInputBg: "#FFFFFF"
 
     QProcess { id: proc }
     FileIO { id: fio }
@@ -112,8 +121,7 @@ MuseScore {
         lastScoreName = curScore ? String(curScore.scoreName) : ""
         loadDeviceToken()
         if (deviceToken === "") {
-            say("bot", "Welcome to Bach Editor. Opening Nzumari sign-in so you can connect this installation.", "", "")
-            Qt.callLater(function() { beginPairing() })
+            say("status", "Not connected to Nzumari. Use the Connect button above to authorise this MuseScore installation.", "", "")
         } else {
             say("bot", "Connected to Nzumari Bach. Ask me to change the open score in plain language. Your edits remain local to MuseScore and one Ctrl+Z undoes each request.", "", "")
         }
@@ -128,14 +136,16 @@ MuseScore {
         if (fio.exists()) deviceToken = String(fio.read()).trim()
     }
     function beginPairing() {
-        if (pairingDeviceCode !== "") return
+        if (pairingDeviceCode !== "" || pairingStarting || deviceToken !== "") return
+        pairingStarting = true
         var x = new XMLHttpRequest()
         x.onreadystatechange = function() {
             if (x.readyState !== XMLHttpRequest.DONE) return
+            pairingStarting = false
             var r = null
             try { r = JSON.parse(x.responseText) } catch (e) {}
             if (x.status !== 200 || !r || !r.deviceCode) {
-                say("error", (r && r.error) || "Could not start Nzumari pairing.", "", "")
+                say("error", (r && r.error) || ("Could not start Nzumari pairing (HTTP " + x.status + ")."), "", "")
                 return
             }
             pairingDeviceCode = r.deviceCode
@@ -186,12 +196,18 @@ MuseScore {
                 if (r.status === "authorized") {
                     stop(); pairingDeviceCode = ""; deviceToken = r.accessToken
                     fio.source = tokenPath()
-                    if (!fio.write(deviceToken)) {
+                    var saved = false
+                    try {
+                        saved = fio.write(deviceToken) && fio.exists() && String(fio.read()).trim() === deviceToken
+                    } catch (e) {
+                        console.log("Bach token persistence error: " + e)
+                    }
+                    if (!saved) {
                         deviceToken = ""
-                        say("error", "Could not save the device credential in the plugin folder.", "", "")
+                        say("error", "Nzumari approved this device, but MuseScore could not save and verify the token at: " + tokenPath(), "", "")
                         return
                     }
-                    say("bot", "Bach Editor is now connected to your Nzumari account.", "", "")
+                    say("bot", "Connected to Nzumari. This device credential has been saved for future MuseScore sessions.", "", "")
                 } else if (r.status === "expired" || r.status === "invalid" || r.status === "revoked") {
                     stop(); pairingDeviceCode = ""
                     say("error", "The pairing request expired or is no longer valid. Click Connect to try again.", "", "")
@@ -203,30 +219,52 @@ MuseScore {
         }
     }
 
-    // ---------- UI ----------
+    // ---------- Nzumari / Bach interface (MuseScore-safe controls) ----------
     Rectangle {
         anchors.fill: parent; color: cBg
 
         Rectangle {   // header
             id: header; anchors { left: parent.left; right: parent.right; top: parent.top }
-            height: 40; color: "#ffffff"
-            Rectangle { anchors { left: parent.left; right: parent.right; bottom: parent.bottom } height: 1; color: cBorder }
+            height: 48; color: "#173B30"
+            Rectangle { anchors { left: parent.left; right: parent.right; bottom: parent.bottom } height: 1; color: "#547365" }
             Text { id: titleText; anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
-                   text: "BACH AI"; font.bold: true; font.pixelSize: 12; font.letterSpacing: 1; color: cText }
+                   text: "NZUMARI  /  BACH"; font.bold: true; font.pixelSize: 12; font.letterSpacing: 1; color: "#FFFFFF" }
             Row {
                 anchors { right: parent.right; rightMargin: 8; top: parent.top; topMargin: 4 } spacing: 4
-                Button { text: deviceToken === "" ? "Sign in" : "Disconnect"; flat: true; font.pixelSize: 11
-                         enabled: !busy; onClicked: { if (deviceToken === "") beginPairing(); else disconnectDevice() } }
+                Button { visible: deviceToken !== ""; text: "Disconnect"; flat: true; font.pixelSize: 11
+                         enabled: !busy; onClicked: disconnectDevice() }
                 Button { text: "New chat"; flat: true; font.pixelSize: 11; enabled: !busy
                          onClicked: { chat.clear(); resetRequest(); bachConversationId = ""; sentCount = 0
-                                      say("bot", "New Bach conversation. Tell me what to change in the open score.", "", "") } }
+                                      say("bot", "A fresh conversation. Tell me what you would like to change in the open score.", "", "") } }
                 Button { text: "Close"; flat: true; font.pixelSize: 11; onClicked: root.quit() }
+            }
+        }
+
+        Rectangle {   // persistent connection panel when this installation is not authorised
+            id: connectionPanel
+            visible: deviceToken === ""
+            anchors { left: parent.left; right: parent.right; top: header.bottom; margins: 10 }
+            height: 124
+            radius: 10
+            color: "#FFFFFF"
+            border.color: cBorder
+            Column {
+                anchors { fill: parent; margins: 12 }
+                spacing: 6
+                Text { text: pairingDeviceCode !== "" ? "WAITING FOR APPROVAL" : (pairingStarting ? "CONNECTING TO NZUMARI…" : "BACH IS NOT CONNECTED")
+                       font.pixelSize: 11; font.bold: true; color: cText }
+                Text { width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 11; color: cMuted
+                       text: pairingDeviceCode !== "" ? "Approve the pairing request in your browser. Code: " + pairingDeviceCode
+                             : "Connect this MuseScore installation to your Nzumari account to use Bach AI." }
+                Button { text: pairingStarting ? "Connecting…" : (pairingDeviceCode !== "" ? "Request pending…" : "Connect to Nzumari")
+                         highlighted: true; enabled: !pairingStarting && pairingDeviceCode === ""
+                         onClicked: beginPairing() }
             }
         }
 
         ListView {
             id: list
-            anchors { left: parent.left; right: parent.right; top: header.bottom
+            anchors { left: parent.left; right: parent.right; top: connectionPanel.visible ? connectionPanel.bottom : header.bottom
                       bottom: showExamples ? examplesBox.top : composer.top; margins: 10 }
             clip: true; spacing: 10; model: chat
             ScrollBar.vertical: ScrollBar {}
@@ -239,7 +277,7 @@ MuseScore {
                 property var opts: model.opts === "" ? [] : model.opts.split("\n")
                 property string msgTime: Qt.formatTime(new Date(), "hh:mm")
 
-                Text { id: who; visible: model.role !== "status"; text: mine ? "You" : "Copilot"
+                Text { id: who; visible: model.role !== "status"; text: mine ? "You" : "Bach"
                        font.pixelSize: 10; font.bold: true; color: cMuted
                        anchors.right: mine ? parent.right : undefined; anchors.left: mine ? undefined : parent.left
                        anchors.top: parent.top; anchors.topMargin: mine ? 0 : 2 }
@@ -260,8 +298,8 @@ MuseScore {
                     anchors.leftMargin: mine ? 0 : 12
                     radius: 10
                     color: mine ? cUser : (model.role === "status" ? "transparent"
-                           : (model.role === "error" ? "#fff1f0" : (model.kind !== "" ? "#fffbf0" : cBot)))
-                    border.color: mine ? "transparent" : (model.role === "error" ? "#f5c2c0" : (model.kind !== "" ? "#f0d58c" : cBorderLight))
+                           : (model.role === "error" ? "#F9EEEE" : (model.kind !== "" ? "#FBF6E9" : cBot)))
+                    border.color: mine ? "transparent" : (model.role === "error" ? "#E7C8C8" : (model.kind !== "" ? "#E5D5B4" : cBorderLight))
                     border.width: mine ? 0 : 1
 
                     Column {
@@ -305,7 +343,7 @@ MuseScore {
             anchors { left: parent.left; right: parent.right; bottom: composer.top
                       leftMargin: 10; rightMargin: 10; bottomMargin: 8 }
             spacing: 8
-            Text { text: "Try one of these:"; font.pixelSize: 12; font.bold: true; color: cMuted }
+            Text { text: "START WITH A TASK"; font.pixelSize: 12; font.bold: true; color: cMuted }
             Row {
                 spacing: 8
                 Repeater {
@@ -315,7 +353,7 @@ MuseScore {
                         height: 44
                         contentItem: Text { text: modelData; wrapMode: Text.Wrap; font.pixelSize: 11; color: cUser }
                         background: Rectangle {
-                            color: parent.pressed ? "#eef2f6" : cInputBg
+                            color: parent.pressed ? "#E9E4D8" : cInputBg
                             radius: 10
                             border.color: cBorderLight
                             border.width: 1
@@ -427,26 +465,50 @@ MuseScore {
         if (!curScore) { say("error", "Open a score first.", "", ""); return }
         var target = curScore.scoreName
         if (deviceToken === "") { beginPairing(); return }
-        // Export the active score; the local parser creates the compact notation snapshot for Bach.
+        // Export the active score; report every failure visibly instead of leaving a stranded user bubble.
         var stamp = Date.now()
         var wd = workDir !== "" ? workDir.replace(/\/+$/, "") + "/" : pluginDir()
-        if (workDir !== "") { proc.startWithArgs("mkdir", ["-p", wd]); proc.waitForFinished(5000) }
         var src = wd + "in-" + stamp + ".musicxml"
         var dst = wd + "out-" + stamp + ".musicxml"
         var rep = wd + "report-" + stamp + ".json"
         var done = wd + "done-" + stamp
-        if (!writeScore(curScore, src, "musicxml")) {
-            say("error", "Could not export the score to " + src + ".", "", ""); return
+        busy = true; elapsed = 0
+        say("status", "Preparing the score for Bach…", "", "")
+        var exported = false
+        try {
+            exported = writeScore(curScore, src, "musicxml")
+        } catch (e) {
+            busy = false
+            console.log("Bach score export exception: " + e)
+            say("error", "MuseScore could not export this score. " + String(e), "", "")
+            return
+        }
+        if (!exported) {
+            busy = false
+            console.log("Bach score export returned false: " + src)
+            say("error", "MuseScore's MusicXML export failed. No AI request was sent.", "", "")
+            return
+        }
+        fio.source = src
+        if (!fio.exists()) {
+            busy = false
+            say("error", "MuseScore reported a successful export, but the MusicXML file was not created: " + src, "", "")
+            return
         }
         var sh = wd + "run-" + stamp + ".sh"
         fio.source = sh
-        fio.write(shq(python) + " " + shq(copilot) + " " + shq(src) + " " + shq(instruction)
-                  + historyArgs() + (bachConversationId !== "" ? " --conversation-id " + shq(bachConversationId) : "")
-                  + (force ? " --yes" : "") + " -o " + shq(dst) + " > " + shq(rep) + " 2>&1\n"
-                  + "echo $? > " + shq(done) + "\n")
+        try {
+            fio.write(shq(python) + " " + shq(copilot) + " " + shq(src) + " " + shq(instruction)
+                      + historyArgs() + (bachConversationId !== "" ? " --conversation-id " + shq(bachConversationId) : "")
+                      + (force ? " --yes" : "") + " -o " + shq(dst) + " > " + shq(rep) + " 2>&1\n"
+                      + "echo $? > " + shq(done) + "\n")
+        } catch (e) {
+            busy = false
+            say("error", "Could not create Bach's local launcher script: " + String(e), "", "")
+            return
+        }
         console.log("copilot launcher: " + sh)
         job = { rep: rep, dst: dst, done: done, target: target }
-        busy = true; elapsed = 0
         proc.startWithArgs("sh", [sh])
         poll.start()
     }
