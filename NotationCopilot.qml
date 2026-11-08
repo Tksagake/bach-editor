@@ -231,7 +231,7 @@ MuseScore {
             id: connectionPanel
             visible: deviceToken === ""
             anchors { left: parent.left; right: parent.right; top: header.bottom; margins: 10 }
-            height: 112
+            height: 132
             radius: 10
             color: "#ffffff"
             border.color: cBorder
