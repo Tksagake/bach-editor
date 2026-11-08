@@ -54,6 +54,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--yes", action="store_true", help="Force apply without confirmation")
     parser.add_argument("--question", action="append", default=[], help="History question (copilot's ask)")
     parser.add_argument("--answer", action="append", default=[], help="History answer (user's reply)")
+    parser.add_argument("--conversation-id", default="", help="Existing Nzumari Bach conversation ID")
     return parser.parse_args()
 
 
