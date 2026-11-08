@@ -2,6 +2,10 @@
 
 Bach Editor is a notation-editor integration for Nzumari Bach AI. The initial integration targets MuseScore 4 and preserves the original score-editing engine from the AiHud Notation Copilot project.
 
+## Interface
+
+Bach Editor uses Nzumari's forest-green, warm-neutral and brass visual identity. The interface includes a persistent connection state, active-score context, a readable conversation view, starter actions and a dedicated message composer. The plugin remains usable in MuseScore 4's floating sidebar-style window.
+
 ## Current architecture
 
 - MuseScore exports the active score to MusicXML locally.
@@ -19,9 +23,9 @@ Bach Editor is a notation-editor integration for Nzumari Bach AI. The initial in
 3. Ensure Python 3 is installed and available as `python` in your PATH. The plugin locates `copilot.py` relative to its own folder; no user-specific path edit is needed.
 4. Enable **Bach AI** in MuseScore's Plugin Manager and restart MuseScore.
 5. Open a score and run **Plugins → Composing/arranging tools → Bach AI**.
-6. On first launch, Bach Editor automatically starts Nzumari device pairing and opens your browser.
-7. Sign in to Nzumari and approve the MuseScore installation. The pairing code is supplied automatically in the verification page.
-8. Return to MuseScore. Bach Editor will confirm when pairing is complete. Future launches reuse the saved device credential until it expires or is revoked.
+6. On first launch, use the **Connect to Nzumari** panel in Bach Editor.
+7. Sign in to Nzumari in the browser window and approve this MuseScore installation. If prompted, confirm the pairing code shown in the plugin.
+8. Return to MuseScore. Bach Editor will show the connected state when pairing completes. Future launches reuse the saved device credential until it expires or is revoked.
 
 No Dahl, MiniMax, DeepSeek or other AI-provider API key is required on the local machine. Provider credentials remain on the Nzumari server.
 
