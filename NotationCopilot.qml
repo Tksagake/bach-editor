@@ -1,7 +1,8 @@
 // Bach Editor -- MuseScore 4 notation integration.
-// This plugin contains GPL-licensed upstream code. The original copyright and
-// licence notice is retained below to comply with the upstream licence.
-// Nzumari-specific authentication, API integration and branding are maintained here.
+// Upstream-derived portions: Copyright (C) 2026 AiHud.
+// Licensed under the GNU GPL v3 or later; retain this notice under the licence.
+// https://copilot.aihud.net/LICENSE | https://copilot.aihud.net/source
+// Nzumari authentication, API integration and product branding are maintained here.
 //
 // DOCKING: MuseScore Studio 4.7.5 cannot dock plugins. The legacy loader maps
 // pluginType "dock" to the same floating dialog as "dialog" (verified empirically
@@ -37,7 +38,7 @@ MuseScore {
     width: 400; height: 760
 
     // MuseScore exposes the directory containing this QML file as filePath.
-    // Keep one shared resolver for copilot.py, credentials and temporary job files.
+    // Keep one shared resolver for the Nzumari API client, credentials and temporary job files.
     function urlToPath(u) {
         var s = String(u)
         if (/^file:\/\/\//i.test(s)) s = s.substring(7)
@@ -462,7 +463,7 @@ MuseScore {
             addAnswer(t)
             runBach(false)
         } else {
-            resetRequest(); instruction = t; runCopilot(false)
+            resetRequest(); instruction = t; runBach(false)
         }
     }
     function pickOption(o) {
@@ -473,16 +474,16 @@ MuseScore {
         }
         say("user", o, "", "")
         addAnswer(o)
-        runCopilot(false)
+        runBach(false)
     }
     function forceApply() {
         say("user", "Apply anyway", "", "")
         if (pendingKind === "clarify")
             addAnswer("No more detail; use your best judgement.")
-        runCopilot(true)
+        runBach(true)
     }
 
-    function runCopilot(force) {
+    function runBach(force) {
         if (!curScore) { say("error", "Open a score first.", "", ""); return }
         var target = curScore.scoreName
         if (deviceToken === "") { beginPairing(); return }
@@ -540,7 +541,7 @@ MuseScore {
             elapsed++
             fio.source = job.done
             if (!fio.exists()) {
-                if (elapsed > 300) { stop(); busy = false; say("error", "Copilot timed out.", "", "") }
+                if (elapsed > 300) { stop(); busy = false; say("error", "Bach timed out.", "", "") }
                 return
             }
             stop(); busy = false
