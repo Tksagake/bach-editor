@@ -1,17 +1,11 @@
 #!/usr/bin/env python3
 """
-copilot.py — Bach AI local backend (developer mode).
+copilot.py — local MuseScore score parser and Nzumari Bach API client.
 
-Called by NotationCopilot.qml via a launcher script:
-    python copilot.py <src.musicxml> "<instruction>" [--question q --answer a]* [--yes] -o <dst>
-Prints a single JSON report object to stdout (captured by QML into <rep>).
-Exits 0 on success, non-zero on failure.
-
-LLM: Dahl AI (OpenAI-compatible endpoint)
-  https://inference.dahl.global/v1/chat/completions
-Models (priority order):
-  1. MiniMaxAI/MiniMax-M2.7
-  2. deepseek-ai/DeepSeek-V4-Flash-0731
+Called by NotationCopilot.qml via a launcher script. It parses the exported
+MusicXML locally, sends a compact score snapshot to Nzumari Bach over HTTPS,
+and prints one structured edit report for the plugin to validate and apply.
+No AI-provider credentials are stored or used on this computer.
 """
 
 import sys
@@ -461,7 +455,7 @@ def _extract_json(text: str) -> Dict[str, Any]:
     raise ValueError("Could not extract JSON from model output")
 
 
-def call_dahl(
+def call_bach_editor(
     score_context: str,
     instruction: str,
     history: List[Tuple[str, str]],
@@ -582,7 +576,7 @@ def main() -> None:
     score_context = serialize_score(score)
 
     # 3. Query Dahl (MiniMax-M2.7 primary, DeepSeek-V4-Flash-0731 fallback)
-    llm_report = call_dahl(score_context, args.instruction, history, args.conversation_id)
+    llm_report = call_bach_editor(score_context, args.instruction, history, args.conversation_id)
 
     # 4. Validate + print the clean JSON to stdout for QML
     validate_report(llm_report)
