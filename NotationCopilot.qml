@@ -29,7 +29,7 @@ import FileIO 3.0
 
 MuseScore {
     id: root
-    version: "0.9.1"
+    version: "0.9.2"
     title: "Bach AI"
     description: "Ask in plain language (any language) and the AI edits the open score: write melodies, scales, exercises and countermelodies, copy or clear bars, add dynamics and chord symbols, voice sections, write pads and bass lines. One Ctrl+Z undoes each request."
     categoryCode: "composing-arranging-tools"
