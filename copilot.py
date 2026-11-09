@@ -12,6 +12,7 @@ import sys
 import json
 import argparse
 import os
+import re
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Tuple, Optional
 from urllib.request import Request, urlopen
@@ -458,6 +459,7 @@ def _extract_json(text: str) -> Dict[str, Any]:
 
 def call_bach_editor(
     score_context: str,
+    musicxml: str,
     instruction: str,
     history: List[Tuple[str, str]],
     conversation_id: str = "",
@@ -476,7 +478,11 @@ def call_bach_editor(
     payload = {
         "instruction": instruction,
         "history": [{"question": question, "answer": answer} for question, answer in history],
-        "scoreContext": {"editor": "musescore", "scoreSummary": score_context},
+        "scoreContext": {
+            "editor": "musescore",
+            "scoreSummary": score_context,
+            "musicxml": musicxml,
+        },
     }
     if conversation_id:
         payload["conversationId"] = conversation_id
@@ -577,11 +583,19 @@ def main() -> None:
     # 1. Parse the incoming MusicXML
     score = parse_musicxml(args.src)
 
-    # 2. Serialize for the LLM
+    # 2. Keep both representations: the compact snapshot is useful for tick lookup,
+    # while the original MusicXML preserves the notation details AiHUD gives its model.
     score_context = serialize_score(score)
+    try:
+        with open(args.src, "r", encoding="utf-8") as musicxml_file:
+            musicxml = musicxml_file.read()
+    except OSError as error:
+        print_error_and_exit("Could not read the exported MusicXML: %s" % error)
+    # Remove inter-tag indentation only; preserve all musical text and attributes.
+    musicxml = re.sub(r">\\s+<", "><", musicxml).strip()
 
-    # 3. Query Dahl (MiniMax-M2.7 primary, DeepSeek-V4-Flash-0731 fallback)
-    llm_report = call_bach_editor(score_context, args.instruction, history, args.conversation_id)
+    # 3. Send the full score plus the compact tick-addressable summary to Nzumari Bach.
+    llm_report = call_bach_editor(score_context, musicxml, args.instruction, history, args.conversation_id)
 
     # 4. Validate + print the clean JSON to stdout for QML
     validate_report(llm_report)
