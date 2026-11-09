@@ -592,7 +592,7 @@ def main() -> None:
     except OSError as error:
         print_error_and_exit("Could not read the exported MusicXML: %s" % error)
     # Remove inter-tag indentation only; preserve all musical text and attributes.
-    musicxml = re.sub(r">\\s+<", "><", musicxml).strip()
+    musicxml = re.sub(r">\s+<", "><", musicxml).strip()
 
     # 3. Send the full score plus the compact tick-addressable summary to Nzumari Bach.
     llm_report = call_bach_editor(score_context, musicxml, args.instruction, history, args.conversation_id)
