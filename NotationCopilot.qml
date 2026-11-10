@@ -645,7 +645,10 @@ MuseScore {
             for (var k = 1; k < 4; k++) if (!voiceHasChords(staff * 4 + k, op.start, op.end)) { v = k; break }
             if (v < 0) throw op.name + " has no free voice in that range"
         } else if (op.replace) {
-            for (var k2 = 1; k2 < 4; k2++)
+            // Replacing the primary voice must clear that voice too; otherwise the new
+            // notes are added on top of the old melody. Secondary-voice writes retain
+            // the existing primary melody and clear the other secondary voices.
+            for (var k2 = (v === 0 ? 0 : 1); k2 < 4; k2++)
                 for (var pass = 0; pass < 2; pass++) {            // chords -> rests -> gone
                     var els = elementsIn(staff * 4 + k2, op.start, op.end)
                     for (var e = 0; e < els.length; e++) removeElement(els[e])
