@@ -23,7 +23,7 @@ TPQ = 480  # MuseScore internal ticks per quarter note (hardcoded in QML applyEd
 # Direct DeepSeek inference. The key is read from the local, git-ignored config.
 DEEPSEEK_BASE_URL = "https://api.deepseek.com/chat/completions"
 DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-pro"
-REQUEST_TIMEOUT_SECONDS = 45
+REQUEST_TIMEOUT_SECONDS = 300
 
 # ---------------------------------------------------------------------------
 # Error reporting — QML reads stdout, finds first line starting with '{', parses JSON.
