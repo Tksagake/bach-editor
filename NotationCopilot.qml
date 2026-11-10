@@ -2,7 +2,7 @@
 // Upstream-derived portions: Copyright (C) 2026 AiHud.
 // Licensed under the GNU GPL v3 or later; retain this notice under the licence.
 // https://copilot.aihud.net/LICENSE | https://copilot.aihud.net/source
-// Nzumari authentication, API integration and product branding are maintained here.
+// Direct DeepSeek inference and Nzumari Bach product branding are maintained here.
 //
 // DOCKING: MuseScore Studio 4.7.5 cannot dock plugins. The legacy loader maps
 // pluginType "dock" to the same floating dialog as "dialog" (verified empirically
@@ -53,15 +53,7 @@ MuseScore {
         return /\/$/.test(d) ? d : d + "/"
     }
 
-    // ---- Nzumari connection ----
-    property string mode: "local"
-    // Nzumari production API.
-    property string serverUrl: "https://nzumari.vivaceke.co.ke"
-    property string deviceToken: "local"             // local inference; no Nzumari pairing required
-    property string pairingDeviceCode: ""
-    property bool pairingStarting: false
-    property bool pairingPollInFlight: false
-    property string pairingPollStatus: "Waiting for first check"
+    // ---- Local inference ----
     property string bachConversationId: ""
     property string python: "python"
     property string copilot: pluginDir() + "copilot.py"
@@ -135,111 +127,6 @@ MuseScore {
         placeTimer.start()
     }
 
-    // ---------- Nzumari device credential ----------
-    // Device tokens are scoped to Bach Editor and can be revoked from Nzumari.
-    function tokenPath() { return pluginDir() + "bach-editor-token.txt" }
-    function loadDeviceToken() {
-        fio.source = tokenPath()
-        if (fio.exists()) deviceToken = String(fio.read()).trim()
-    }
-    function beginPairing() {
-        if (pairingDeviceCode !== "" || pairingStarting || deviceToken !== "") return
-        pairingStarting = true
-        var x = new XMLHttpRequest()
-        x.onreadystatechange = function() {
-            if (x.readyState !== XMLHttpRequest.DONE) return
-            pairingStarting = false
-            var r = null
-            try { r = JSON.parse(x.responseText) } catch (e) {}
-            if (x.status !== 200 || !r || !r.deviceCode) {
-                say("error", (r && r.error) || ("Could not start Nzumari pairing (HTTP " + x.status + ")."), "", "")
-                return
-            }
-            pairingDeviceCode = r.deviceCode
-            say("bot", "Approve this MuseScore installation in your browser. Pairing code: " + r.userCode, "", "")
-            Qt.openUrlExternally(r.verificationUri)
-            pairingPoll.start()
-        }
-        x.open("POST", serverUrl + "/api/bach/editor/device")
-        x.setRequestHeader("Content-Type", "application/json")
-        x.send(JSON.stringify({ action: "authorize", deviceName: "Bach Editor · MuseScore" }))
-    }
-    function disconnectDevice() {
-        if (deviceToken === "") return
-        var x = new XMLHttpRequest()
-        x.onreadystatechange = function() {
-            if (x.readyState !== XMLHttpRequest.DONE) return
-            var r = null
-            try { r = JSON.parse(x.responseText) } catch (e) {}
-            if (x.status === 200 && r && r.revoked) {
-                fio.source = tokenPath()
-                try { fio.remove() } catch (e) {}
-                deviceToken = ""; bachConversationId = ""
-                say("bot", "This MuseScore installation has been disconnected from Nzumari.", "", "")
-            } else {
-                say("error", (r && r.error) || "Could not revoke this device credential.", "", "")
-            }
-        }
-        x.open("POST", serverUrl + "/api/bach/editor/device")
-        x.setRequestHeader("Content-Type", "application/json")
-        x.setRequestHeader("Authorization", "Bearer " + deviceToken)
-        x.send(JSON.stringify({ action: "revoke" }))
-    }
-
-    Timer {
-        id: pairingPoll; interval: 3000; repeat: true
-        onTriggered: {
-            if (pairingDeviceCode === "") { stop(); return }
-            // Do not let a slow request overlap the next timer tick. The server
-            // consumes the device code when it issues the one-time access token.
-            if (pairingPollInFlight) return
-            pairingPollInFlight = true
-            var pollCode = pairingDeviceCode
-            pairingPollStatus = "Checking Nzumari…"
-            var x = new XMLHttpRequest()
-            x.onreadystatechange = function() {
-                if (x.readyState !== XMLHttpRequest.DONE) return
-                pairingPollInFlight = false
-                // Ignore late responses from a previous pairing attempt.
-                if (pairingDeviceCode !== pollCode) return
-                var r = null
-                try { r = JSON.parse(x.responseText) } catch (e) {}
-                console.log("Bach pairing poll: HTTP " + x.status + " · " + (r && r.status ? r.status : "no JSON status"))
-                if (x.status !== 200 || !r) {
-                    stop(); pairingDeviceCode = ""
-                    pairingPollStatus = "Request failed (HTTP " + x.status + ")"
-                    say("error", (r && r.error) || ("Could not complete Nzumari pairing (HTTP " + x.status + ")."), "", "")
-                    return
-                }
-                pairingPollStatus = "Nzumari says: " + String(r.status || "unknown")
-                if (r.status === "authorized" && r.accessToken) {
-                    stop(); pairingDeviceCode = ""; deviceToken = r.accessToken
-                    fio.source = tokenPath()
-                    var saved = false
-                    try {
-                        saved = fio.write(deviceToken) && fio.exists() && String(fio.read()).trim() === deviceToken
-                    } catch (e) {
-                        console.log("Bach token persistence error: " + e)
-                    }
-                    if (!saved) {
-                        deviceToken = ""
-                        pairingPollStatus = "Approved, but token save failed"
-                        say("error", "Nzumari approved this device, but MuseScore could not save and verify the token at: " + tokenPath(), "", "")
-                        return
-                    }
-                    pairingPollStatus = "Connected and token saved"
-                    say("bot", "Connected to Nzumari. This device credential has been saved for future MuseScore sessions.", "", "")
-                } else if (r.status === "expired" || r.status === "invalid" || r.status === "revoked" || r.status === "consumed") {
-                    stop(); pairingDeviceCode = ""
-                    say("error", "The pairing request is no longer valid (" + r.status + "). Click Connect to try again.", "", "")
-                }
-            }
-            x.open("POST", serverUrl + "/api/bach/editor/device")
-            x.setRequestHeader("Content-Type", "application/json")
-            x.send(JSON.stringify({ action: "token", deviceCode: pollCode }))
-        }
-    }
-
     // ---------- Nzumari / Bach interface (MuseScore-safe controls) ----------
     Rectangle {
         anchors.fill: parent; color: cBg
@@ -252,8 +139,6 @@ MuseScore {
                    text: "NZUMARI  /  BACH"; font.bold: true; font.pixelSize: 12; font.letterSpacing: 1; color: "#FFFFFF" }
             Row {
                 anchors { right: parent.right; rightMargin: 8; top: parent.top; topMargin: 4 } spacing: 4
-                Button { visible: false; text: "Disconnect"; flat: true; font.pixelSize: 11
-                         enabled: !busy; onClicked: disconnectDevice() }
                 Button { text: "New chat"; flat: true; font.pixelSize: 11; enabled: !busy
                          onClicked: { chat.clear(); resetRequest(); bachConversationId = ""; sentCount = 0
                                       say("bot", "A fresh conversation. Tell me what you would like to change in the open score.", "", "") } }
@@ -261,31 +146,9 @@ MuseScore {
             }
         }
 
-        Rectangle {   // persistent connection panel when this installation is not authorised
-            id: connectionPanel
-            visible: false
-            anchors { left: parent.left; right: parent.right; top: header.bottom; margins: 10 }
-            height: 124
-            radius: 10
-            color: "#FFFFFF"
-            border.color: cBorder
-            Column {
-                anchors { fill: parent; margins: 12 }
-                spacing: 6
-                Text { text: pairingDeviceCode !== "" ? "WAITING FOR APPROVAL" : (pairingStarting ? "CONNECTING TO NZUMARI…" : "BACH IS NOT CONNECTED")
-                       font.pixelSize: 11; font.bold: true; color: cText }
-                Text { width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 11; color: cMuted
-                       text: pairingDeviceCode !== "" ? "Approve the pairing request in your browser. Code: " + pairingDeviceCode + "\n" + pairingPollStatus
-                             : "Connect this MuseScore installation to your Nzumari account to use Bach AI." }
-                Button { text: pairingStarting ? "Connecting…" : (pairingDeviceCode !== "" ? "Request pending…" : "Connect to Nzumari")
-                         highlighted: true; enabled: !pairingStarting && pairingDeviceCode === ""
-                         onClicked: beginPairing() }
-            }
-        }
-
         ListView {
             id: list
-            anchors { left: parent.left; right: parent.right; top: connectionPanel.visible ? connectionPanel.bottom : header.bottom
+            anchors { left: parent.left; right: parent.right; top: header.bottom
                       bottom: showExamples ? examplesBox.top : composer.top; margins: 10 }
             clip: true; spacing: 10; model: chat
             ScrollBar.vertical: ScrollBar {}
