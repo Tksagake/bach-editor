@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-copilot.py — local MuseScore score parser and Nzumari Bach API client.
+copilot.py — local MuseScore score parser and direct DeepSeek client.
 
-Called by NotationCopilot.qml via a launcher script. It parses the exported
-MusicXML locally, sends a compact score snapshot to Nzumari Bach over HTTPS,
-and prints one structured edit report for the plugin to validate and apply.
-No AI-provider credentials are stored or used on this computer.
+MusicXML is parsed locally. Score-edit requests go directly from this computer
+to DeepSeek's OpenAI-compatible API; Nzumari's web backend is not in this path.
+The returned structured edit report is validated before QML applies it.
 """
 
 import sys
@@ -17,11 +16,14 @@ import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Tuple, Optional
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+import time
 
 TPQ = 480  # MuseScore internal ticks per quarter note (hardcoded in QML applyEdits)
 
-# All AI requests are routed through the Nzumari Bach API. No local model/provider calls.
-NZUMARI_BASE_URL = "https://nzumari.vivaceke.co.ke"
+# Direct DeepSeek inference. The key is read from the local, git-ignored config.
+DEEPSEEK_BASE_URL = "https://api.deepseek.com/chat/completions"
+DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-pro"
+REQUEST_TIMEOUT_SECONDS = 60
 
 # ---------------------------------------------------------------------------
 # Error reporting — QML reads stdout, finds first line starting with '{', parses JSON.
@@ -50,7 +52,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--yes", action="store_true", help="Force apply without confirmation")
     parser.add_argument("--question", action="append", default=[], help="History question (copilot's ask)")
     parser.add_argument("--answer", action="append", default=[], help="History answer (user's reply)")
-    parser.add_argument("--conversation-id", default="", help="Existing Nzumari Bach conversation ID")
+    parser.add_argument("--conversation-id", default="", help=argparse.SUPPRESS)
     return parser.parse_args()
 
 
@@ -428,6 +430,30 @@ def _extract_json(text: str) -> Dict[str, Any]:
     raise ValueError("Could not extract JSON from model output")
 
 
+def load_local_config() -> Dict[str, str]:
+    """Load the provider key without ever printing it or committing it."""
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bach-editor-config.json")
+    config: Dict[str, Any] = {}
+    try:
+        with open(config_path, "r", encoding="utf-8") as config_file:
+            loaded = json.load(config_file)
+            if isinstance(loaded, dict):
+                config = loaded
+    except FileNotFoundError:
+        pass
+    except (OSError, json.JSONDecodeError) as error:
+        print_error_and_exit("Could not read bach-editor-config.json: %s" % error)
+
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip() or str(config.get("deepseek_api_key", "")).strip()
+    model = str(config.get("model", DEFAULT_DEEPSEEK_MODEL)).strip() or DEFAULT_DEEPSEEK_MODEL
+    if not api_key:
+        print_error_and_exit(
+            "DeepSeek is not configured. Create bach-editor-config.json beside copilot.py "
+            "with your DeepSeek API key. See bach-editor-config.example.json."
+        )
+    return {"api_key": api_key, "model": model}
+
+
 def call_bach_editor(
     score_context: str,
     musicxml: str,
@@ -435,73 +461,91 @@ def call_bach_editor(
     history: List[Tuple[str, str]],
     conversation_id: str = "",
 ) -> Dict[str, Any]:
-    """Send notation-edit requests to the authenticated Nzumari Bach API."""
-    token_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bach-editor-token.txt")
-    try:
-        with open(token_path, "r", encoding="utf-8") as token_file:
-            device_token = token_file.read().strip()
-    except OSError:
-        device_token = ""
+    """Call DeepSeek directly; no Nzumari backend, auth, or cloud context lookup."""
+    config = load_local_config()
+    history_text = ""
+    if history:
+        history_text = "\\n\\nCONVERSATION SO FAR:\\n" + "\\n".join(
+            "User: %s\\nBach: %s" % (question, answer) for question, answer in history
+        )
 
-    if not device_token:
-        print_error_and_exit("Bach Editor is not connected. Use Connect in the plugin to pair it with Nzumari.")
-
+    user_content = (
+        "USER REQUEST:\\n" + instruction + history_text
+        + "\\n\\nCURRENT SCORE SNAPSHOT (authoritative tick/pitch coordinates):\\n"
+        + score_context
+        + "\\n\\nORIGINAL MUSICXML (for notation, instruments, key, meter and musical context):\\n"
+        + musicxml
+    )
     payload = {
-        "instruction": instruction,
-        "history": [{"question": question, "answer": answer} for question, answer in history],
-        "scoreContext": {
-            "editor": "musescore",
-            "scoreSummary": score_context,
-            "musicxml": musicxml,
-        },
+        "model": config["model"],
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        "stream": False,
+        "thinking": {"type": "disabled"},
+        "temperature": 0.7,
+        "max_tokens": 6000,
     }
-    if conversation_id:
-        payload["conversationId"] = conversation_id
-
     request = Request(
-        NZUMARI_BASE_URL.rstrip("/") + "/api/bach/editor/edit",
-        data=json.dumps(payload).encode("utf-8"),
+        DEEPSEEK_BASE_URL,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={
-            "Authorization": "Bearer " + device_token,
+            "Authorization": "Bearer " + config["api_key"],
             "Content-Type": "application/json",
             "Accept": "application/json",
         },
         method="POST",
     )
 
+    started = time.monotonic()
     try:
-        with urlopen(request, timeout=65) as response:
+        with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             response_body = response.read().decode("utf-8")
     except HTTPError as error:
         try:
             detail = json.loads(error.read().decode("utf-8"))
-            message = detail.get("error") or "Bach Editor request failed."
-            code = str(detail.get("code") or "")
-            request_id = str(detail.get("requestId") or "")
+            provider_message = detail.get("error", {}).get("message") if isinstance(detail.get("error"), dict) else detail.get("error")
         except Exception:
-            message = "Bach Editor request failed (HTTP %s)." % error.code
-            code = ""
-            request_id = ""
-        print_error_and_exit(message, code=code, request_id=request_id)
+            provider_message = ""
+        if error.code in (401, 403):
+            message = "DeepSeek authentication failed. Check the API key in bach-editor-config.json."
+        elif error.code == 402:
+            message = "DeepSeek API balance is insufficient."
+        elif error.code == 429:
+            message = "DeepSeek rate limit reached. Wait briefly and try again."
+        else:
+            message = "DeepSeek API returned HTTP %s%s" % (
+                error.code, (": " + str(provider_message)[:500]) if provider_message else ""
+            )
+        print_error_and_exit(message, code="deepseek_http_%s" % error.code)
     except (URLError, TimeoutError, OSError) as error:
-        print_error_and_exit("Could not reach Nzumari Bach: %s" % error)
+        print_error_and_exit("Could not reach DeepSeek directly: %s" % error)
 
     try:
-        result = json.loads(response_body)
+        data = json.loads(response_body)
     except json.JSONDecodeError:
-        print_error_and_exit("Nzumari Bach returned an invalid response.")
+        print_error_and_exit("DeepSeek returned invalid JSON.")
+
+    choice = (data.get("choices") or [{}])[0]
+    message = choice.get("message") or {}
+    content = message.get("content")
+    if isinstance(content, list):
+        content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+    if not isinstance(content, str) or not content.strip():
+        finish_reason = choice.get("finish_reason", "unknown")
+        print_error_and_exit("DeepSeek returned no final content (finish_reason: %s)." % finish_reason)
+
+    try:
+        result = _extract_json(content)
+    except ValueError:
+        print_error_and_exit("DeepSeek's response was not valid Bach edit JSON.")
 
     if not isinstance(result, dict):
-        print_error_and_exit("Malformed Bach response.")
-    if result.get("error"):
-        print_error_and_exit(str(result["error"]))
-
-    conversation_id = result.pop("conversationId", "")
-    if conversation_id:
-        result["conversation_id"] = conversation_id
-    if "status" not in result:
-        print_error_and_exit("Malformed Bach response: missing 'status' field.")
+        print_error_and_exit("Malformed DeepSeek response: expected a JSON object.")
+    result.setdefault("generation_seconds", round(time.monotonic() - started, 1))
     return result
+
 
 # ---------------------------------------------------------------------------
 # Report validation (lightweight; QML also validates structurally when applying)
@@ -565,8 +609,8 @@ def main() -> None:
     # Remove inter-tag indentation only; preserve all musical text and attributes.
     musicxml = re.sub(r">\s+<", "><", musicxml).strip()
 
-    # 3. Send the full score plus the compact tick-addressable summary to Nzumari Bach.
-    llm_report = call_bach_editor(score_context, musicxml, args.instruction, history, args.conversation_id)
+    # 3. Send the score directly to DeepSeek (the Nzumari web backend is bypassed).
+    llm_report = call_bach_editor(score_context, musicxml, args.instruction, history)
 
     # 4. Validate + print the clean JSON to stdout for QML
     validate_report(llm_report)
