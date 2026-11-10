@@ -67,8 +67,9 @@ def _midi_pitch(step: str, octave: int, alter: int) -> int:
 
 
 def _written_tpc(step: str, alter: int) -> int:
-    """Written pitch class 0-11 (for spelling)."""
-    return (STEP_INDEX[step] + alter) % 12
+    """MuseScore Tonal Pitch Class (line-of-fifths encoding)."""
+    base = {"F": 13, "C": 14, "G": 15, "D": 16, "A": 17, "E": 18, "B": 19}
+    return base[step] + 7 * alter
 
 
 def _parse_pitch(pitch_el: ET.Element) -> Tuple[int, int]:
@@ -238,8 +239,8 @@ def _parse_measure(m_el: ET.Element, part: MusicXMLPart, score: MusicXMLScore) -
 
         is_rest = child.find("rest") is not None
         is_chord = child.find("chord") is not None
-        voice = int(child.findtext("voice", "1") or 1)
-        staff = int(child.findtext("staff", "1") or 1)
+        voice = max(0, int(child.findtext("voice", "1") or 1) - 1)
+        staff = max(0, int(child.findtext("staff", "1") or 1) - 1)
         dur_div = int(child.findtext("duration", "0") or 0)
         key = (voice, staff)
         tick_div = last_start.get(key, running_div) if is_chord else running_div
@@ -317,13 +318,13 @@ CONTEXT
 -------
 You receive a serialized snapshot of the open MuseScore score. Every pitch is a MIDI concert-pitch number (0-127; 60 = middle C). Every tick is on a 480-TPQ grid. Parts are 0-indexed; each part has staff(s) (staff index is 0-based within the part for multi-staff instruments like piano). Voices are 0-3 within a staff track.
 
-The score snapshot lists measures with absolute ticks, and each note/rest with: tick, duration (480-TPQ ticks), MIDI pitch, written pitch-class (tpc, 0-11), voice, staff.
+The score snapshot lists measures with absolute ticks, and each note/rest with: tick, duration (480-TPQ ticks), MIDI pitch, MuseScore Tonal Pitch Class (TPC, -1 to 33), voice, staff.
 
 RULES
 -----
 1. Only change what the user asks. Do not invent edits.
 2. All tick values in your edits must be on the 480-TPQ scale shown in the snapshot.
-3. All pitches in edits must be MIDI concert-pitch numbers. Provide written tpc (0-11) for spelling corrections.
+3. All pitches in edits must be MIDI concert-pitch numbers. Provide MuseScore TPC values (-1 to 33) for exact written spelling.
 4. Bar lengths must remain valid: voice 1 must exactly fill each bar; voices 2-4 may be partial. If your edits would break this, the whole request is rolled back.
 5. If the request is ambiguous (missing bars, staff, pitches, etc.), return status "question" with kind "clarify" or "confirm" plus helpful options.
 6. Otherwise return status "applied" with a valid "edits" array.
@@ -336,7 +337,7 @@ write:
   { "op":"write","name":"...","part":0,"staff":0,"start":0,"end":1920,"voice":0,"replace":true,"stem":"up",
     "events":[ {"t":0,"d":480,"rest":true},
                {"t":480,"d":960,"n":[[60,0],[64,2]],"tup":[3,2,720]} ] }
-  n = [[midi, tpc], ...]; tup = [numerator, denominator, total_ticks]
+  n = [[midi, MuseScore_TPC], ...]; tup = [numerator, denominator, total_ticks]
 
 pitches:
   { "op":"pitches","name":"...","part":0,"staff":0,
