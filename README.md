@@ -4,7 +4,7 @@ Bach Editor is a notation-editor integration for Nzumari Bach AI. The initial in
 
 ## Interface
 
-Bach Editor uses Nzumari's forest-green, warm-neutral and brass visual identity. The interface includes a persistent connection state, active-score context, a readable conversation view, starter actions and a dedicated message composer. The plugin remains usable in MuseScore 4's floating sidebar-style window.
+Bach Editor uses Nzumari's forest-green, warm-neutral and brass visual identity. The interface includes active-score context, a readable conversation view, starter actions and a dedicated message composer. The plugin remains usable in MuseScore 4's floating sidebar-style window.
 
 ## Current architecture
 
