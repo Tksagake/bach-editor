@@ -14,7 +14,7 @@
 // stays open across requests (it is non-modal).
 //
 // Flow per message: export the OPEN score to MusicXML -> local parser creates a compact
-// score snapshot -> authenticated Nzumari Bach Editor API -> apply validated edits in place.
+// score snapshot -> direct DeepSeek API request -> apply validated edits in place.
 // question with option buttons -> apply the returned edit list IN PLACE to the open score
 // inside one startCmd()/endCmd(), so a single Ctrl+Z undoes the whole request. Every request
 // re-exports the score, so follow-ups build on it, including any manual edits.
@@ -57,7 +57,7 @@ MuseScore {
     property string mode: "local"
     // Nzumari production API.
     property string serverUrl: "https://nzumari.vivaceke.co.ke"
-    property string deviceToken: ""                 // scoped Nzumari device token
+    property string deviceToken: "local"             // local inference; no Nzumari pairing required
     property string pairingDeviceCode: ""
     property bool pairingStarting: false
     property bool pairingPollInFlight: false
@@ -83,7 +83,7 @@ MuseScore {
                                      "Transpose the flute part up a major second in bars 1-8",
                                      "Add chord symbols to the melody in bars 1-8",
                                      "Double the melody in the strings in bars 1-8"]
-    readonly property bool showExamples: sentCount === 0 && !busy && deviceToken !== ""
+    readonly property bool showExamples: sentCount === 0 && !busy
 
     readonly property color cBg: "#F7F5EF"
     readonly property color cUser: "#173B30"
@@ -131,12 +131,7 @@ MuseScore {
 
     onRun: {
         lastScoreName = curScore ? String(curScore.scoreName) : ""
-        loadDeviceToken()
-        if (deviceToken === "") {
-            say("status", "Not connected to Nzumari. Use the Connect button above to authorise this MuseScore installation.", "", "")
-        } else {
-            say("bot", "Connected to Nzumari Bach. Ask me to change the open score in plain language. Your edits remain local to MuseScore and one Ctrl+Z undoes each request.", "", "")
-        }
+        say("bot", "Bach is ready. Score generation runs directly from this computer to DeepSeek; Nzumari sign-in is not required. Your edits remain local to MuseScore and one Ctrl+Z undoes each request.", "", "")
         placeTimer.start()
     }
 
@@ -257,7 +252,7 @@ MuseScore {
                    text: "NZUMARI  /  BACH"; font.bold: true; font.pixelSize: 12; font.letterSpacing: 1; color: "#FFFFFF" }
             Row {
                 anchors { right: parent.right; rightMargin: 8; top: parent.top; topMargin: 4 } spacing: 4
-                Button { visible: deviceToken !== ""; text: "Disconnect"; flat: true; font.pixelSize: 11
+                Button { visible: false; text: "Disconnect"; flat: true; font.pixelSize: 11
                          enabled: !busy; onClicked: disconnectDevice() }
                 Button { text: "New chat"; flat: true; font.pixelSize: 11; enabled: !busy
                          onClicked: { chat.clear(); resetRequest(); bachConversationId = ""; sentCount = 0
@@ -268,7 +263,7 @@ MuseScore {
 
         Rectangle {   // persistent connection panel when this installation is not authorised
             id: connectionPanel
-            visible: deviceToken === ""
+            visible: false
             anchors { left: parent.left; right: parent.right; top: header.bottom; margins: 10 }
             height: 124
             radius: 10
@@ -457,7 +452,6 @@ MuseScore {
         if (t === "" || busy) return
         input.text = ""
         say("user", t, "", "")
-        if (deviceToken === "") { beginPairing(); return }
         sentCount++
         if (pendingKind === "clarify") {
             addAnswer(t)
@@ -486,7 +480,6 @@ MuseScore {
     function runBach(force) {
         if (!curScore) { say("error", "Open a score first.", "", ""); return }
         var target = curScore.scoreName
-        if (deviceToken === "") { beginPairing(); return }
         // Export the active score; report every failure visibly instead of leaving a stranded user bubble.
         var stamp = Date.now()
         var wd = workDir !== "" ? workDir.replace(/\/+$/, "") + "/" : pluginDir()
