@@ -458,6 +458,7 @@ def _extract_json(text: str) -> Dict[str, Any]:
 
 def call_bach_editor(
     score_context: str,
+    args_musicxml_path: str,
     instruction: str,
     history: List[Tuple[str, str]],
     conversation_id: str = "",
@@ -473,10 +474,30 @@ def call_bach_editor(
     if not device_token:
         print_error_and_exit("Bach Editor is not connected. Use Connect in the plugin to pair it with Nzumari.")
 
+    # Send both the compact 480-TPQ snapshot and the original MusicXML.
+    # The snapshot gives the model convenient edit coordinates; MusicXML preserves
+    # authoritative notation details that the current parser does not yet model.
+    try:
+        with open(args_musicxml_path, "r", encoding="utf-8") as score_file:
+            musicxml = score_file.read()
+    except OSError as error:
+        print_error_and_exit("Could not read exported MusicXML: %s" % error)
+
+    if len(musicxml.encode("utf-8")) > 200000:
+        print_error_and_exit(
+            "This score exceeds the current Bach Editor API limit of 200 KB. "
+            "Export a smaller section and try again.",
+            code="score_context_too_large",
+        )
+
     payload = {
         "instruction": instruction,
         "history": [{"question": question, "answer": answer} for question, answer in history],
-        "scoreContext": {"editor": "musescore", "scoreSummary": score_context},
+        "scoreContext": {
+            "editor": "musescore",
+            "scoreSummary": score_context,
+            "musicxml": musicxml,
+        },
     }
     if conversation_id:
         payload["conversationId"] = conversation_id
@@ -581,7 +602,7 @@ def main() -> None:
     score_context = serialize_score(score)
 
     # 3. Query Dahl (MiniMax-M2.7 primary, DeepSeek-V4-Flash-0731 fallback)
-    llm_report = call_bach_editor(score_context, args.instruction, history, args.conversation_id)
+    llm_report = call_bach_editor(score_context, args.src, args.instruction, history, args.conversation_id)
 
     # 4. Validate + print the clean JSON to stdout for QML
     validate_report(llm_report)
