@@ -293,7 +293,8 @@ def serialize_score(score: MusicXMLScore) -> str:
     lines.append(f"TICKS_PER_QUARTER: {TPQ}")
     lines.append(f"PARTS: {len(score.parts)}")
     for p_idx, part in enumerate(score.parts):
-        lines.append(f"\nPART {p_idx} (id={part.id}, name='{part.name}', staves=1):")
+        staff_count = max((n.staff for m in part.measures for n in m.notes), default=0) + 1
+        lines.append(f"\nPART {p_idx} (id={part.id}, name='{part.name}', staves={staff_count}):")
         for m in part.measures:
             lines.append(f"  MEASURE {m.number} (tick {m.start_tick}-{m.end_tick}, key={m.fifths} fifths, "
                          f"{m.beats}/{m.beat_type}):")
