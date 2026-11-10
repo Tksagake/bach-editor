@@ -38,7 +38,7 @@ MuseScore {
     width: 400; height: 760
 
     // MuseScore exposes the directory containing this QML file as filePath.
-    // Keep one shared resolver for the Nzumari API client, credentials and temporary job files.
+    // Keep one shared resolver for the local inference helper and temporary job files.
     function urlToPath(u) {
         var s = String(u)
         if (/^file:\/\/\//i.test(s)) s = s.substring(7)
@@ -399,7 +399,7 @@ MuseScore {
             if (!proc.waitForFinished(1)) {
                 if (elapsed > 65) {
                     stop(); busy = false
-                    say("error", "Bach did not respond within 65 seconds. The request was stopped; check the Nzumari provider.", "", "")
+                    say("error", "Bach did not respond within 65 seconds. The request was stopped; check the local DeepSeek API key and connection.", "", "")
                     resetRequest()
                 }
                 return
