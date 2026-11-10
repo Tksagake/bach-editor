@@ -465,15 +465,15 @@ def call_bach_editor(
     config = load_local_config()
     history_text = ""
     if history:
-        history_text = "\\n\\nCONVERSATION SO FAR:\\n" + "\\n".join(
-            "User: %s\\nBach: %s" % (question, answer) for question, answer in history
+        history_text = "\n\nCONVERSATION SO FAR:\n" + "\n".join(
+            "User: %s\nBach: %s" % (question, answer) for question, answer in history
         )
 
     user_content = (
-        "USER REQUEST:\\n" + instruction + history_text
-        + "\\n\\nCURRENT SCORE SNAPSHOT (authoritative tick/pitch coordinates):\\n"
+        "USER REQUEST:\n" + instruction + history_text
+        + "\n\nCURRENT SCORE SNAPSHOT (authoritative tick/pitch coordinates):\n"
         + score_context
-        + "\\n\\nORIGINAL MUSICXML (for notation, instruments, key, meter and musical context):\\n"
+        + "\n\nORIGINAL MUSICXML (for notation, instruments, key, meter and musical context):\n"
         + musicxml
     )
     payload = {
