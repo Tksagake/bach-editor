@@ -106,12 +106,17 @@ class MusicXMLMeasure:
 
 
 class MusicXMLPart:
-    __slots__ = ("id", "name", "measures")
+    __slots__ = ("id", "name", "measures", "divisions", "fifths", "beats", "beat_type")
 
     def __init__(self, pid, name):
         self.id = pid
         self.name = name
         self.measures: List[MusicXMLMeasure] = []
+        # MusicXML attributes are stateful: omitted values carry forward.
+        self.divisions = 2
+        self.fifths = 0
+        self.beats = 4
+        self.beat_type = 4
 
 
 class MusicXMLScore:
@@ -178,25 +183,31 @@ def parse_musicxml(file_path: str) -> MusicXMLScore:
 
 
 def _parse_measure(m_el: ET.Element, part: MusicXMLPart, score: MusicXMLScore) -> None:
+    """Parse one measure while preserving MusicXML attribute state and voice timing."""
     number = int(m_el.get("number", "0"))
+    divisions = part.divisions
+    fifths = part.fifths
+    beats = part.beats
+    beat_type = part.beat_type
 
-    divisions = score.ticks_per_quarter
-    fifths = 0
-    beats = 4
-    beat_type = 4
     attrs = m_el.find("attributes")
     if attrs is not None:
         d = attrs.findtext("divisions")
         if d:
             divisions = int(d)
-            score.ticks_per_quarter = divisions
         k = attrs.find("key")
         if k is not None:
-            fifths = int(k.findtext("fifths", "0") or 0)
+            fifths = int(k.findtext("fifths", str(fifths)) or fifths)
         t = attrs.find("time")
         if t is not None:
-            beats = int(t.findtext("beats", "4") or 4)
-            beat_type = int(t.findtext("beat-type", "4") or 4)
+            beats = int(t.findtext("beats", str(beats)) or beats)
+            beat_type = int(t.findtext("beat-type", str(beat_type)) or beat_type)
+
+    part.divisions = divisions
+    part.fifths = fifths
+    part.beats = beats
+    part.beat_type = beat_type
+    score.ticks_per_quarter = divisions
 
     measure = MusicXMLMeasure(number, start_tick=0)
     measure.divisions = divisions
@@ -205,94 +216,54 @@ def _parse_measure(m_el: ET.Element, part: MusicXMLPart, score: MusicXMLScore) -
     measure.beat_type = beat_type
     part.measures.append(measure)
 
-    factor = TPQ / divisions  # ticks per division
+    factor = TPQ / divisions
     running_div = 0
-    chord_tick_div = 0
-    chord_members: List[Tuple[int, int]] = []
+    last_start: Dict[Tuple[int, int], int] = {}
 
-    for note_el in m_el.findall("note"):
-        is_rest = note_el.find("rest") is not None
-        is_chord = note_el.find("chord") is not None
-        voice = int(note_el.findtext("voice", "1") or 1)
-        staff = int(note_el.findtext("staff", "1") or 1)
-
-        dur_div = int(note_el.findtext("duration", "0") or 0)
-
-        if is_chord and chord_members:
-            if not is_rest:
-                midi, tpc = _parse_pitch(note_el.find("pitch"))
-                chord_members.append((midi, tpc))
+    # Process children in document order. <backup>/<forward> move the MusicXML
+    # cursor between voices; <chord> notes share the preceding note's onset.
+    for child in list(m_el):
+        tag = child.tag.split("}")[-1]
+        if tag == "backup":
+            amount = int(child.findtext("duration", "0") or 0)
+            running_div = max(0, running_div - amount)
+            continue
+        if tag == "forward":
+            amount = int(child.findtext("duration", "0") or 0)
+            running_div += amount
+            continue
+        if tag != "note":
             continue
 
-        if chord_members:
-            tick_div = chord_tick_div
-            for midi, tpc in chord_members:
-                measure.notes.append(
-                    MusicXMLNote(
-                        int(tick_div * factor),
-                        int(dur_div * factor) if dur_div else 0,
-                        midi,
-                        tpc,
-                        False,
-                        True,
-                        voice,
-                        staff,
-                    )
-                )
-            chord_members = []
-            running_div = chord_tick_div + dur_div
+        is_rest = child.find("rest") is not None
+        is_chord = child.find("chord") is not None
+        voice = int(child.findtext("voice", "1") or 1)
+        staff = int(child.findtext("staff", "1") or 1)
+        dur_div = int(child.findtext("duration", "0") or 0)
+        key = (voice, staff)
+
+        if is_chord:
+            tick_div = last_start.get(key, running_div)
+        else:
+            tick_div = running_div
+            last_start[key] = tick_div
 
         if is_rest:
-            measure.notes.append(
-                MusicXMLNote(
-                    int(running_div * factor),
-                    int(dur_div * factor),
-                    -1,
-                    0,
-                    True,
-                    False,
-                    voice,
-                    staff,
-                )
-            )
-            running_div += dur_div
+            measure.notes.append(MusicXMLNote(
+                int(tick_div * factor), int(dur_div * factor), -1, 0,
+                True, False, voice, staff
+            ))
         else:
-            pitch_el = note_el.find("pitch")
-            if pitch_el is None:
-                continue
-            midi, tpc = _parse_pitch(pitch_el)
-            tick_div = running_div
-            measure.notes.append(
-                MusicXMLNote(
-                    int(tick_div * factor),
-                    int(dur_div * factor),
-                    midi,
-                    tpc,
-                    False,
-                    False,
-                    voice,
-                    staff,
-                )
-            )
+            pitch_el = child.find("pitch")
+            if pitch_el is not None:
+                midi, tpc = _parse_pitch(pitch_el)
+                measure.notes.append(MusicXMLNote(
+                    int(tick_div * factor), int(dur_div * factor), midi, tpc,
+                    False, is_chord, voice, staff
+                ))
+
+        if not is_chord:
             running_div += dur_div
-            chord_tick_div = tick_div
-
-    if chord_members:
-        tick_div = chord_tick_div
-        for midi, tpc in chord_members:
-            measure.notes.append(
-                MusicXMLNote(
-                    int(tick_div * factor),
-                    int(dur_div * factor) if dur_div else 0,
-                    midi,
-                    tpc,
-                    False,
-                    True,
-                    voice,
-                    staff,
-                )
-            )
-
 
 def _finalize_measure_ticks(score: MusicXMLScore) -> None:
     """Assign absolute 480-TPQ start/end ticks to measures within each part."""
