@@ -397,19 +397,38 @@ MuseScore {
             elapsed++
             // Poll for completion without blocking MuseScore's UI thread.
             if (!proc.waitForFinished(1)) {
-                if (elapsed > 300) {
+                // A failed-to-start process is already NotRunning and will never finish.
+                if (proc.state === 0) {
                     stop(); busy = false
-                    say("error", "Bach did not respond within 5 minutes. The request was stopped; check the local DeepSeek API key and connection.", "", "")
+                    say("error", "Bach could not start its local Python process.", "", "", String(proc.errorString))
+                    resetRequest()
+                    return
+                }
+                if (elapsed > 300) {
+                    stop()
+                    proc.kill()
+                    proc.waitForFinished(1000)
+                    var timeoutOut = String(proc.readAllStandardOutput())
+                    var timeoutErr = String(proc.readAllStandardError())
+                    busy = false
+                    say("error", "Bach exceeded the 5-minute safety limit. The Python process was terminated.",
+                        "", "", ("STDOUT:\n" + timeoutOut + "\nSTDERR:\n" + timeoutErr).slice(-3000))
                     resetRequest()
                 }
                 return
             }
             stop(); busy = false
-            handleReport(String(proc.readAllStandardOutput()), 0)
+            var stdoutText = String(proc.readAllStandardOutput())
+            var stderrText = String(proc.readAllStandardError())
+            var exitCode = proc.exitCode
+            var exitStatus = proc.exitStatus
+            var diagnostics = "Exit code: " + exitCode + " | Exit status: " + exitStatus
+            if (stderrText.trim() !== "") diagnostics += "\nSTDERR:\n" + stderrText
+            handleReport(stdoutText, exitCode, diagnostics)
         }
     }
 
-    function handleReport(txt, rc) {
+    function handleReport(txt, rc, diagnostics) {
         var rep = null
         var j = txt.search(/^\{/m)
         if (j >= 0) { try { rep = JSON.parse(txt.substring(j)) } catch (e) { rep = null } }
@@ -417,7 +436,8 @@ MuseScore {
         if (rep && rep.conversation_id) bachConversationId = String(rep.conversation_id)
 
         if (rep && rep.status === "error") {
-            say("error", rep.message || "Nzumari Bach could not complete this request.", "", "", logText(rep))
+            say("error", rep.message || "Bach could not complete this request.", "", "",
+                [logText(rep), diagnostics || ""].filter(function(x) { return x !== "" }).join("\n"))
             resetRequest(); return
         }
 
@@ -431,7 +451,8 @@ MuseScore {
             return
         }
         if (rc !== 0 || !rep) {
-            say("error", "Something went wrong (exit " + rc + ").", "", "", txt.slice(-1500))
+            var detail = (txt + "\n" + (diagnostics || "")).trim()
+            say("error", "Bach's local process failed (exit " + rc + ").", "", "", detail.slice(-3000))
             resetRequest(); return
         }
         if (rep.status === "applied") finishApplied(rep, rep.edits || [], rep.edit_notes || [], rep.edit_summary)
