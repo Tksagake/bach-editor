@@ -112,12 +112,9 @@ MuseScore {
 
     onRun: {
         lastScoreName = curScore ? String(curScore.scoreName) : ""
-        
+        if (copilot === "") copilot = urlToPath(Qt.resolvedUrl("copilot.py"))
         sayHello()
-        
-        else say("bot", "Hi! Ask me for anything in the open score, in your own words, e.g. \"write a simple 4-bar melody in bars 1-4\", "
-            + "\"repeat bars 1-4 in bars 5-8\", \"add chord symbols Am G Am E7 to bars 1-4\" or "
-            + "\"voice the alto 1 melody in bars 9-16 for the saxes\". I only touch what you ask for.", "", "")
+        say("bot", "Connected to Nzumari Bach. Ask me to write or edit the open score. Python and copilot.py must be installed and available.", "", "")
         placeTimer.start()
     }
 
@@ -433,7 +430,7 @@ MuseScore {
         }
         // Nzumari local client: launch Python directly, without a shell script.
         var stamp = Date.now()
-        var wd = workDir !== "" ? workDir.replace(/\\/g, "/").replace(/\\/+$/, "") + "/" : pluginDir()
+        var wd = workDir !== "" ? workDir.replace(/\\/g, "/").replace(/\/+$/, "") + "/" : pluginDir()
         src = wd + "in-" + stamp + ".musicxml"
         var dst = wd + "out-" + stamp + ".musicxml"
         if (!writeScore(curScore, src, "musicxml")) {
@@ -506,7 +503,7 @@ MuseScore {
             var rc = proc.exitCode()
             var stdout = String(proc.readAllStandardOutput())
             var stderr = String(proc.readAllStandardError())
-            handleReport(stdout + (stderr ? "\\n" + stderr : ""), rc)
+            handleReport(stdout + (stderr ? "\n" + stderr : ""), rc)
         }
     }
 
