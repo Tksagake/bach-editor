@@ -37,22 +37,12 @@ MuseScore {
     requiresScore: true
     width: 400; height: 760
 
-    // ---- Settings ----
-    // mode "hosted": POST the exported MusicXML to the AiHud Notation Copilot service
-    //   (customers need only this plugin + an AiHud Copilot key; no Python, no Claude key).
-    // mode "local": run copilot.py on this machine via a launcher script (developer mode).
-    property string mode: "hosted"
-    property string serverUrl: "https://copilot.aihud.net"   // e.g. http://127.0.0.1:8787 for local testing
-    property string apiKey: ""                                // your AiHud Copilot key
-    property int requestTimeoutSec: 480   // > server REQUEST_TIMEOUT 420 s and nginx 450 s, so the server's own reply arrives first
-
-    // Local mode only -- adjust to your install.
-    property string python: "python3"
-    property string copilot: ""   // path to copilot.py (not distributed; hosted mode is the supported path)
-    // Folder for the launcher's temp files; "" = this plugin's own folder (works on every OS).
+    // Nzumari Bach is the only supported backend. Python handles score parsing
+    // and validation locally; the authenticated Nzumari API handles AI orchestration.
+    property string mode: "local"
+    property string python: Qt.platform.os === "windows" ? "python" : "python3"
+    property string copilot: ""
     property string workDir: ""
-    // Optional env file with ANTHROPIC_API_KEY (MuseScore's environment usually lacks it).
-    property string envFile: ""
     property int sidebarWidth: 400
 
     // Conversation state for the request in flight.
@@ -122,9 +112,9 @@ MuseScore {
 
     onRun: {
         lastScoreName = curScore ? String(curScore.scoreName) : ""
-        if (mode === "hosted" && apiKey === "") loadKey()
+        
         sayHello()
-        if (mode === "hosted" && apiKey === "") askForKey()
+        
         else say("bot", "Hi! Ask me for anything in the open score, in your own words, e.g. \"write a simple 4-bar melody in bars 1-4\", "
             + "\"repeat bars 1-4 in bars 5-8\", \"add chord symbols Am G Am E7 to bars 1-4\" or "
             + "\"voice the alto 1 melody in bars 9-16 for the saxes\". I only touch what you ask for.", "", "")
@@ -441,27 +431,25 @@ MuseScore {
             }
             postHosted(src, "", force, target); return
         }
-        // ---- local (developer) mode, Linux/macOS ----
+        // Nzumari local client: launch Python directly, without a shell script.
         var stamp = Date.now()
-        var wd = workDir !== "" ? workDir.replace(/\/+$/, "") + "/" : pluginDir()
-        if (workDir !== "") { proc.startWithArgs("mkdir", ["-p", wd]); proc.waitForFinished(5000) }
+        var wd = workDir !== "" ? workDir.replace(/\\/g, "/").replace(/\\/+$/, "") + "/" : pluginDir()
         src = wd + "in-" + stamp + ".musicxml"
         var dst = wd + "out-" + stamp + ".musicxml"
-        var rep = wd + "report-" + stamp + ".json"
-        var done = wd + "done-" + stamp
         if (!writeScore(curScore, src, "musicxml")) {
             say("error", "Could not export the score to " + src + ".", "", ""); return
         }
-        var sh = wd + "run-" + stamp + ".sh"
-        fio.source = sh
-        fio.write("[ -f " + shq(envFile) + " ] && { set -a; . " + shq(envFile) + "; set +a; }\n"
-                  + shq(python) + " " + shq(copilot) + " " + shq(src) + " " + shq(instruction)
-                  + historyArgs() + (force ? " --yes" : "") + " -o " + shq(dst) + " > " + shq(rep) + " 2>&1\n"
-                  + "echo $? > " + shq(done) + "\n")
-        console.log("copilot launcher: " + sh)
-        job = { rep: rep, dst: dst, done: done, hosted: false, target: target }
+        if (copilot === "") copilot = urlToPath(Qt.resolvedUrl("copilot.py"))
+        var args = [copilot, src, instruction]
+        for (var h = 0; h < history.length; h++) {
+            args.push("--question"); args.push(history[h].question)
+            args.push("--answer"); args.push(history[h].answer)
+        }
+        if (force) args.push("--yes")
+        args.push("-o"); args.push(dst)
+        job = { target: target, started: true }
         busy = true; elapsed = 0
-        proc.startWithArgs("sh", [sh])
+        proc.startWithArgs(python, args)
         poll.start()
     }
 
@@ -506,23 +494,19 @@ MuseScore {
         id: poll; interval: 1000; repeat: true
         onTriggered: {
             elapsed++
-            if (job.hosted) {
-                if (elapsed > requestTimeoutSec && job.xhr) {
-                    var x = job.xhr; job.xhr = null; x.abort(); stop(); busy = false
-                    say("error", "The Copilot service did not answer within " + requestTimeoutSec + "s.", "", "")
+            if (proc.state() !== 0) {
+                if (elapsed > 300) {
+                    proc.kill(); stop(); busy = false
+                    say("error", "Nzumari Bach timed out after 5 minutes.", "", "")
                     resetRequest()
                 }
                 return
             }
-            fio.source = job.done
-            if (!fio.exists()) {
-                if (elapsed > 300) { stop(); busy = false; say("error", "Copilot timed out.", "", "") }
-                return
-            }
             stop(); busy = false
-            var rc = parseInt(fio.read())
-            fio.source = job.rep
-            handleReport(fio.read(), rc)
+            var rc = proc.exitCode()
+            var stdout = String(proc.readAllStandardOutput())
+            var stderr = String(proc.readAllStandardError())
+            handleReport(stdout + (stderr ? "\\n" + stderr : ""), rc)
         }
     }
 
