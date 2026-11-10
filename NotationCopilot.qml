@@ -534,9 +534,9 @@ MuseScore {
             elapsed++
             // Poll for completion without blocking MuseScore's UI thread.
             if (!proc.waitForFinished(1)) {
-                if (elapsed > 75) {
+                if (elapsed > 65) {
                     stop(); busy = false
-                    say("error", "Bach did not respond within 75 seconds. The request was stopped; check the Nzumari provider.", "", "")
+                    say("error", "Bach did not respond within 65 seconds. The request was stopped; check the Nzumari provider.", "", "")
                     resetRequest()
                 }
                 return
