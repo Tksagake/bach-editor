@@ -517,21 +517,21 @@ MuseScore {
             say("error", "MuseScore reported a successful export, but the MusicXML file was not created: " + src, "", "")
             return
         }
-        var sh = wd + "run-" + stamp + ".sh"
-        fio.source = sh
-        try {
-            fio.write(shq(python) + " " + shq(copilot) + " " + shq(src) + " " + shq(instruction)
-                      + historyArgs() + (bachConversationId !== "" ? " --conversation-id " + shq(bachConversationId) : "")
-                      + (force ? " --yes" : "") + " -o " + shq(dst) + " > " + shq(rep) + " 2>&1\n"
-                      + "echo $? > " + shq(done) + "\n")
-        } catch (e) {
-            busy = false
-            say("error", "Could not create Bach's local launcher script: " + String(e), "", "")
-            return
+        // Launch Python directly with an argument list. This avoids a POSIX shell
+        // dependency and works on Windows as well as macOS/Linux.
+        var args = [copilot, src, instruction]
+        for (var h = 0; h < history.length; h++) {
+            args.push("--question"); args.push(history[h].question)
+            args.push("--answer"); args.push(history[h].answer)
         }
-        console.log("copilot launcher: " + sh)
-        job = { rep: rep, dst: dst, done: done, target: target }
-        proc.startWithArgs("sh", [sh])
+        if (bachConversationId !== "") {
+            args.push("--conversation-id"); args.push(bachConversationId)
+        }
+        if (force) args.push("--yes")
+        args.push("-o"); args.push(dst)
+        job = { target: target }
+        console.log("Bach Python process: " + python + " " + copilot)
+        proc.startWithArgs(python, args)
         poll.start()
     }
 
@@ -539,15 +539,17 @@ MuseScore {
         id: poll; interval: 1000; repeat: true
         onTriggered: {
             elapsed++
-            fio.source = job.done
-            if (!fio.exists()) {
-                if (elapsed > 300) { stop(); busy = false; say("error", "Bach timed out.", "", "") }
+            // Poll for completion without blocking MuseScore's UI thread.
+            if (!proc.waitForFinished(1)) {
+                if (elapsed > 360) {
+                    stop(); busy = false
+                    say("error", "Bach timed out after six minutes. Check the Python process and try again.", "", "")
+                    resetRequest()
+                }
                 return
             }
             stop(); busy = false
-            var rc = parseInt(fio.read())
-            fio.source = job.rep
-            handleReport(fio.read(), rc)
+            handleReport(String(proc.readAllStandardOutput()), 0)
         }
     }
 
@@ -557,6 +559,11 @@ MuseScore {
         if (j >= 0) { try { rep = JSON.parse(txt.substring(j)) } catch (e) { rep = null } }
         var head = (j >= 0 ? txt.substring(0, j) : txt).trim()
         if (rep && rep.conversation_id) bachConversationId = String(rep.conversation_id)
+
+        if (rep && rep.status === "error") {
+            say("error", rep.message || "Nzumari Bach could not complete this request.", "", "", logText(rep))
+            resetRequest(); return
+        }
 
         if (rep && rep.status === "question") {
             pendingKind = rep.kind; pendingQuestion = rep.question
