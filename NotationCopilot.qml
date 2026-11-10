@@ -491,19 +491,18 @@ MuseScore {
         id: poll; interval: 1000; repeat: true
         onTriggered: {
             elapsed++
-            if (proc.state() !== 0) {
-                if (elapsed > 300) {
-                    proc.kill(); stop(); busy = false
-                    say("error", "Nzumari Bach timed out after 5 minutes.", "", "")
+            // waitForFinished(1) yields after at most 1 ms; the UI remains responsive.
+            if (!proc.waitForFinished(1)) {
+                if (elapsed > 360) {
+                    stop(); busy = false
+                    say("error", "Nzumari Bach timed out. The Python request did not finish.", "", "")
                     resetRequest()
                 }
                 return
             }
             stop(); busy = false
-            var rc = proc.exitCode()
             var stdout = String(proc.readAllStandardOutput())
-            var stderr = String(proc.readAllStandardError())
-            handleReport(stdout + (stderr ? "\n" + stderr : ""), rc)
+            handleReport(stdout, 0)
         }
     }
 
