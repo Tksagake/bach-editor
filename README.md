@@ -9,35 +9,40 @@ Bach Editor uses Nzumari's forest-green, warm-neutral and brass visual identity.
 ## Current architecture
 
 - MuseScore exports the active score to MusicXML locally.
-- The bundled Python helper parses the score and builds a compact notation snapshot.
-- Bach Editor authenticates to Nzumari using a device-pairing flow.
-- The snapshot and editing instruction are sent to Nzumari's Bach Editor API over HTTPS.
-- Nzumari assembles the same composer profile, confirmed memories, conversation history and authorised work context used by Bach.
-- Bach returns a structured edit report; the plugin validates and applies the operations locally in MuseScore.
-- Score edits remain local to MuseScore. The API receives the compact score snapshot needed for the requested edit, not the original MusicXML file.
+- The bundled Python helper parses the score and builds a compact, tick-addressable notation snapshot.
+- The helper sends the score context and instruction directly to DeepSeek's OpenAI-compatible API.
+- DeepSeek returns a structured edit report; the helper validates the JSON and the plugin applies the operations locally in MuseScore.
+- Nzumari's web backend, account sign-in, device pairing and cloud context retrieval are not involved in score generation.
+- The original MusicXML and score snapshot are sent directly to DeepSeek for the requested edit. Score edits remain local to MuseScore.
 
 ## Install (MuseScore 4)
 
 1. Download the latest **Bach Editor** ZIP from the repository's `feature/nzumari-bach-auth` branch.
 2. Extract the `bach-editor-feature-nzumari-bach-auth` folder into your MuseScore 4 `Plugins` directory. Keep `NotationCopilot.qml` and `copilot.py` together in the same folder.
-3. Ensure Python 3 is installed and available as `python` in your PATH. The plugin locates `copilot.py` relative to its own folder; no user-specific path edit is needed.
-4. Enable **Bach AI** in MuseScore's Plugin Manager and restart MuseScore.
-5. Open a score and run **Plugins → Composing/arranging tools → Bach AI**.
-6. On first launch, use the **Connect to Nzumari** panel in Bach Editor.
-7. Sign in to Nzumari in the browser window and approve this MuseScore installation. If prompted, confirm the pairing code shown in the plugin.
-8. Return to MuseScore. Bach Editor will show the connected state when pairing completes. Future launches reuse the saved device credential until it expires or is revoked.
+3. Ensure Python 3 is installed and available as `python` in your PATH. The plugin locates `copilot.py` relative to its own folder.
+4. Copy `bach-editor-config.example.json` to `bach-editor-config.json` in the same plugin folder.
+5. Add your DeepSeek API key to `bach-editor-config.json` (see the example below). Never paste the key into chat or commit the real config file.
+6. Enable **Bach AI** in MuseScore's Plugin Manager and restart MuseScore.
+7. Open a score and run **Plugins → Composing/arranging tools → Bach AI**.
 
-No Dahl, MiniMax, DeepSeek or other AI-provider API key is required on the local machine. Provider credentials remain on the Nzumari server.
+Example local config:
 
-## Authentication
+```json
+{
+  "deepseek_api_key": "YOUR_DEEPSEEK_API_KEY",
+  "model": "deepseek-v4-pro"
+}
+```
 
-The plugin uses a scoped Nzumari device credential rather than a copied browser session or provider API key. Pairing codes expire after 10 minutes. Device credentials currently expire after 90 days and can be revoked server-side. If a credential is lost or expires, pair the plugin again.
+You can alternatively set the `DEEPSEEK_API_KEY` environment variable. The environment variable takes precedence over the local config.
 
-The current MuseScore plugin stores its device credential in `bach-editor-token.txt` beside the plugin. The file is excluded by `.gitignore`; do not commit or share it. Protect access to your Windows user account and plugin directory. OS credential-store integration is a follow-up hardening task.
+## Local API credentials
+
+The plugin reads `bach-editor-config.json` beside `copilot.py`. This file is excluded by `.gitignore`; do not commit or share it. Protect access to your Windows user account and plugin directory. The key is sent only to `https://api.deepseek.com` over HTTPS and is never sent to Nzumari. OS credential-store integration is a follow-up hardening task.
 
 ## Data handling
 
-The score snapshot, editing instruction and Bach response are sent to Nzumari over HTTPS. The editing request is stored in the user's Bach conversation so the same Bach history and context can be used across Nzumari and the notation editor. The plugin does not upload the original MusicXML file as a persistent asset. Existing Nzumari personalisation settings govern the context Bach may use.
+The score snapshot, original MusicXML, editing instruction and response are exchanged directly with DeepSeek over HTTPS. Nzumari does not receive these local plugin requests. Conversation memory and cloud personalisation are not currently part of this local inference path.
 
 ## Editing behaviour
 
