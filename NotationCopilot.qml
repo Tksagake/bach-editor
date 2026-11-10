@@ -400,7 +400,7 @@ MuseScore {
                 // A failed-to-start process is already NotRunning and will never finish.
                 if (proc.state === 0) {
                     stop(); busy = false
-                    say("error", "Bach could not start its local Python process.", "", "", String(proc.errorString))
+                    say("error", "Bach could not start its local Python process.", "", "", String(proc.errorString()))
                     resetRequest()
                     return
                 }
