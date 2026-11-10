@@ -541,9 +541,9 @@ MuseScore {
             elapsed++
             // Poll for completion without blocking MuseScore's UI thread.
             if (!proc.waitForFinished(1)) {
-                if (elapsed > 360) {
+                if (elapsed > 75) {
                     stop(); busy = false
-                    say("error", "Bach timed out after six minutes. Check the Python process and try again.", "", "")
+                    say("error", "Bach did not respond within 75 seconds. The request was stopped; check the Nzumari provider.", "", "")
                     resetRequest()
                 }
                 return
