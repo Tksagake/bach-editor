@@ -397,9 +397,9 @@ MuseScore {
             elapsed++
             // Poll for completion without blocking MuseScore's UI thread.
             if (!proc.waitForFinished(1)) {
-                if (elapsed > 65) {
+                if (elapsed > 50) {
                     stop(); busy = false
-                    say("error", "Bach did not respond within 65 seconds. The request was stopped; check the local DeepSeek API key and connection.", "", "")
+                    say("error", "Bach did not respond within 50 seconds. The request was stopped; check the local DeepSeek API key and connection.", "", "")
                     resetRequest()
                 }
                 return
