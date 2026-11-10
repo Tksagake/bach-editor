@@ -312,7 +312,7 @@ def serialize_score(score: MusicXMLScore) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Dahl LLM integration
+# Direct DeepSeek LLM integration
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """You are an expert MuseScore 4 notation editor operating on a strict 480-ticks-per-quarter-note (TPQ) grid.
