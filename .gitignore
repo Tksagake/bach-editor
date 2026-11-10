@@ -5,6 +5,7 @@
 
 # Local Nzumari device credentials and generated score files
 bach-editor-token.txt
+bach-editor-config.json
 copilot-key.txt
 copilot-export.musicxml
 in-*.musicxml
