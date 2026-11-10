@@ -470,7 +470,7 @@ def call_bach_editor(
     )
 
     try:
-        with urlopen(request, timeout=300) as response:
+        with urlopen(request, timeout=65) as response:
             response_body = response.read().decode("utf-8")
     except HTTPError as error:
         try:
